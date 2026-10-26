@@ -22,5 +22,14 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 - `format/completions`, the Chat Completions format (`/chat/completions`): instructions and
   message items encoded as messages, `max_output_tokens` sent as `max_completion_tokens`, and
   the reply's message, `finish_reason`, and usage decoded into the response.
+- Image input: `protocol.InputImage`, the spec's `input_image` (an image URL, remote or data, and
+  a detail level, `ImageDetail`), on user messages as the spec allows, and `protocol.DataURL` to
+  build a base64 data URL from bytes and a media type. Chat Completions sends it as an
+  `image_url` part.
+- Audio input, the first client extension: `protocol.InputAudio` holds a clip's bytes and its
+  `AudioFormat`, wav or mp3, on user messages. Its Open Responses wire type is
+  `spike-ai-pipeline:input_audio`, extending spec 2026-04-24 until the spec adds an audio input
+  part; the protocol package's documentation lists it. Chat Completions sends it as an
+  `input_audio` part, the clip in base64.
 
 [Unreleased]: https://github.com/JaimeStill/spike-ai-pipeline-client/commits/main

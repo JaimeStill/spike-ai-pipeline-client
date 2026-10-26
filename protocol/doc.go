@@ -12,8 +12,14 @@
 // A client extension is a feature the spec doesn't yet define, added under the spec's extension
 // rule: its wire type is prefixed with the implementor slug, spike-ai-pipeline. Each is listed
 // here with the spec version it extends and the standard feature that would replace it. Its Go
-// type and constructor never carry the slug, so moving to the standard feature changes only the
-// wire discriminator and the formats' mappings, not callers' code. There are none yet.
+// type and constructor never carry the slug. When the spec adopts the feature, the client moves
+// to the standard type and removes the extension: the wire discriminator and the formats'
+// mappings change, and callers' Go code doesn't.
+//
+//   - Audio input: [InputAudio], wire type spike-ai-pipeline:input_audio, extending spec
+//     2026-04-24. An audio input content part in the spec would replace it. A format whose API
+//     has audio input of its own sends the clip in that API's form instead, as Chat Completions
+//     does with input_audio.
 //
 // Its exported identifiers:
 //
@@ -31,6 +37,12 @@
 //     [RoleAssistant].
 //   - [ContentPart] is a part of a message's content, a closed set.
 //   - [InputText] is text input, input_text.
+//   - [InputImage] is image input, input_image, by URL or data URL.
+//   - [ImageDetail] is an image's detail level: [ImageDetailAuto], [ImageDetailLow], or
+//     [ImageDetailHigh].
+//   - [DataURL] builds a base64 data URL from bytes and a media type.
+//   - [InputAudio] is audio input, the client extension spike-ai-pipeline:input_audio.
+//   - [AudioFormat] is a clip's encoding: [AudioFormatWAV] or [AudioFormatMP3].
 //   - [OutputText] is text output, output_text.
 //   - [Refusal] is the model's refusal, refusal.
 package protocol

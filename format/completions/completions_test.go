@@ -120,6 +120,52 @@ func TestEncode(t *testing.T) {
 			want: `{"model":"m","messages":[{"role":"assistant","content":[{"type":"refusal","refusal":"no"}]}]}`,
 		},
 		{
+			name: "input_image by data URL as image_url, detail omitted when unset",
+			req: &protocol.Request{Model: "m", Input: []protocol.Item{protocol.Message{
+				Role: protocol.RoleUser,
+				Content: []protocol.ContentPart{
+					protocol.InputText{Text: "Describe this image."},
+					protocol.InputImage{ImageURL: protocol.DataURL("image/png", []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'})},
+				},
+			}}},
+			want: `{"model":"m","messages":[{"role":"user","content":[
+				{"type":"text","text":"Describe this image."},
+				{"type":"image_url","image_url":{"url":"data:image/png;base64,iVBORw0KGgo="}}]}]}`,
+		},
+		{
+			name: "single input_image by remote URL with detail as an array",
+			req: &protocol.Request{Model: "m", Input: []protocol.Item{protocol.Message{
+				Role: protocol.RoleUser,
+				Content: []protocol.ContentPart{
+					protocol.InputImage{ImageURL: "https://example.com/shapes.png", Detail: protocol.ImageDetailHigh},
+				},
+			}}},
+			want: `{"model":"m","messages":[{"role":"user","content":[
+				{"type":"image_url","image_url":{"url":"https://example.com/shapes.png","detail":"high"}}]}]}`,
+		},
+		{
+			name: "input_audio with its bytes in base64",
+			req: &protocol.Request{Model: "m", Input: []protocol.Item{protocol.Message{
+				Role: protocol.RoleUser,
+				Content: []protocol.ContentPart{
+					protocol.InputText{Text: "Transcribe this clip."},
+					protocol.InputAudio{Data: []byte("RIFF\x24\x00\x00\x00WAVE"), Format: protocol.AudioFormatWAV},
+				},
+			}}},
+			want: `{"model":"m","messages":[{"role":"user","content":[
+				{"type":"text","text":"Transcribe this clip."},
+				{"type":"input_audio","input_audio":{"data":"UklGRiQAAABXQVZF","format":"wav"}}]}]}`,
+		},
+		{
+			name: "single input_audio as an array",
+			req: &protocol.Request{Model: "m", Input: []protocol.Item{protocol.Message{
+				Role:    protocol.RoleUser,
+				Content: []protocol.ContentPart{protocol.InputAudio{Data: []byte{0xff, 0xfb, 0x90}, Format: protocol.AudioFormatMP3}},
+			}}},
+			want: `{"model":"m","messages":[{"role":"user","content":[
+				{"type":"input_audio","input_audio":{"data":"//uQ","format":"mp3"}}]}]}`,
+		},
+		{
 			name: "max_output_tokens as max_completion_tokens",
 			req:  &protocol.Request{Model: "m", Input: []protocol.Item{text(protocol.RoleUser, "hi")}, MaxOutputTokens: 64},
 			want: `{"model":"m","messages":[{"role":"user","content":"hi"}],"max_completion_tokens":64}`,

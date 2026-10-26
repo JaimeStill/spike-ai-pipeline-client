@@ -5,7 +5,6 @@ package integration_test
 import (
 	"errors"
 	"net/http"
-	"strings"
 	"testing"
 
 	client "github.com/JaimeStill/spike-ai-pipeline-client"
@@ -27,29 +26,11 @@ func TestChat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
-	if resp.Status != protocol.StatusCompleted {
-		t.Fatalf("Status = %q (%+v), want completed", resp.Status, resp.IncompleteDetails)
-	}
-	if len(resp.Output) != 1 {
-		t.Fatalf("Output has %d items, want 1 message: %#v", len(resp.Output), resp.Output)
-	}
-	m, ok := resp.Output[0].(protocol.Message)
-	if !ok || m.Role != protocol.RoleAssistant || m.Status != protocol.StatusCompleted {
-		t.Fatalf("Output[0] = %#v, want a completed assistant message", resp.Output[0])
-	}
-	var text strings.Builder
-	for _, p := range m.Content {
-		if o, ok := p.(protocol.OutputText); ok {
-			text.WriteString(o.Text)
-		}
-	}
-	if strings.TrimSpace(text.String()) == "" {
-		t.Fatalf("the message has no output_text: %#v", m.Content)
-	}
+	text := completedText(t, resp)
 	if u := resp.Usage; u.InputTokens == 0 || u.OutputTokens == 0 || u.TotalTokens != u.InputTokens+u.OutputTokens {
 		t.Errorf("Usage = %+v, want input and output counted, and total their sum", u)
 	}
-	t.Logf("output_text %q, usage %+v", text.String(), resp.Usage)
+	t.Logf("output_text %q, usage %+v", text, resp.Usage)
 }
 
 func TestChatIncompleteAtMaxOutputTokens(t *testing.T) {

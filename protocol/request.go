@@ -30,7 +30,8 @@ type Request struct {
 // request before sending it; a client validates every request before anything is sent. It
 // refuses nil, no model, no input, an item or content part that isn't one of this package's by
 // value (a *Message is refused), a message with an unknown role or no content, a part its role
-// doesn't take, a negative MaxOutputTokens, and a Native that isn't a JSON object with unique
+// doesn't take, an image with no URL or an unknown detail, an audio clip with no data or an
+// unknown format, a negative MaxOutputTokens, and a Native that isn't a JSON object with unique
 // member names.
 func (r *Request) Validate() error {
 	if err := r.validate(); err != nil {
@@ -74,8 +75,9 @@ func validateItem(it Item) error {
 }
 
 // validateMessage refuses a message with an unknown role or no content, and a part its role
-// doesn't take: input parts from the user, system, and developer, output parts from the
-// assistant.
+// doesn't take. The spec gives each role its parts: the user input_text and input_image, the
+// system and developer input_text alone, and the assistant output_text and refusal. The audio
+// extension, an input part like input_image, is the user's alone too.
 func validateMessage(m Message) error {
 	switch m.Role {
 	case RoleUser, RoleSystem, RoleDeveloper, RoleAssistant:
@@ -86,16 +88,56 @@ func validateMessage(m Message) error {
 		return fmt.Errorf("%s message has no content", m.Role)
 	}
 	for i, p := range m.Content {
-		var ok bool
-		switch p.(type) {
-		case InputText:
-			ok = m.Role != RoleAssistant
-		case OutputText, Refusal:
-			ok = m.Role == RoleAssistant
-		}
-		if !ok {
-			return fmt.Errorf("%s message content %d: unsupported part %T", m.Role, i, p)
+		if err := validatePart(m.Role, p); err != nil {
+			return fmt.Errorf("%s message content %d: %w", m.Role, i, err)
 		}
 	}
 	return nil
+}
+
+// validatePart refuses a part role doesn't take, and an image or audio part that is malformed.
+func validatePart(role Role, p ContentPart) error {
+	switch p := p.(type) {
+	case InputText:
+		if role != RoleAssistant {
+			return nil
+		}
+	case InputImage:
+		if role == RoleUser {
+			return validateImage(p)
+		}
+	case InputAudio:
+		if role == RoleUser {
+			return validateAudio(p)
+		}
+	case OutputText, Refusal:
+		if role == RoleAssistant {
+			return nil
+		}
+	}
+	return fmt.Errorf("unsupported part %T", p)
+}
+
+// validateImage refuses an image with no URL or an unknown detail level.
+func validateImage(p InputImage) error {
+	if p.ImageURL == "" {
+		return errors.New("image has no URL")
+	}
+	switch p.Detail {
+	case "", ImageDetailAuto, ImageDetailLow, ImageDetailHigh:
+		return nil
+	}
+	return fmt.Errorf("image has unknown detail %q", p.Detail)
+}
+
+// validateAudio refuses a clip with no data or an unknown format.
+func validateAudio(p InputAudio) error {
+	if len(p.Data) == 0 {
+		return errors.New("audio has no data")
+	}
+	switch p.Format {
+	case AudioFormatWAV, AudioFormatMP3:
+		return nil
+	}
+	return fmt.Errorf("audio has unknown format %q", p.Format)
 }

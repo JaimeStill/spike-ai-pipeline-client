@@ -1,5 +1,7 @@
 package protocol
 
+import "encoding/base64"
+
 // Item is one unit of a conversation, as Open Responses defines it: a message, a function call
 // or its output, or reasoning. Items are carried in a request's Input and a response's
 // Output, and the same value moves from one response's Output into the next request's Input,
@@ -10,8 +12,9 @@ type Item interface {
 	item()
 }
 
-// Message is a message item: content from a role. Input messages from the user, system, or
-// developer hold InputText parts; assistant messages hold OutputText and Refusal parts.
+// Message is a message item: content from a role. User messages hold InputText, InputImage,
+// and InputAudio parts; system and developer messages hold InputText parts, as the spec allows
+// them no other; assistant messages hold OutputText and Refusal parts.
 type Message struct {
 	// ID is the item's id, when the format supplies one. Chat Completions doesn't.
 	ID string
@@ -54,6 +57,61 @@ type InputText struct {
 }
 
 func (InputText) contentPart() {}
+
+// InputImage is an image input to the model: input_image.
+type InputImage struct {
+	// ImageURL locates the image: a fully qualified URL the endpoint fetches, or the image
+	// itself as a base64 data URL, which DataURL builds from its bytes. It is required.
+	ImageURL string
+	// Detail is the resolution the model sees the image at. Empty leaves it to the endpoint,
+	// whose default is ImageDetailAuto.
+	Detail ImageDetail
+}
+
+func (InputImage) contentPart() {}
+
+// ImageDetail is the resolution at which the model sees an InputImage.
+type ImageDetail string
+
+// The detail levels an InputImage takes.
+const (
+	// ImageDetailAuto lets the endpoint choose the detail level.
+	ImageDetailAuto ImageDetail = "auto"
+	// ImageDetailLow restricts the model to a lower-resolution version of the image.
+	ImageDetailLow ImageDetail = "low"
+	// ImageDetailHigh lets the model see a higher-resolution version of the image, usually at a
+	// higher input token cost.
+	ImageDetailHigh ImageDetail = "high"
+)
+
+// DataURL returns data as a base64 data URL of mediaType, such as "image/png", for an
+// InputImage's ImageURL: "data:image/png;base64,...".
+func DataURL(mediaType string, data []byte) string {
+	return "data:" + mediaType + ";base64," + base64.StdEncoding.EncodeToString(data)
+}
+
+// InputAudio is an audio clip input to the model. It is a client extension, the spec having no
+// audio input part: on the Open Responses wire its type is spike-ai-pipeline:input_audio, and
+// the package comment lists it with the standard feature that would replace it.
+type InputAudio struct {
+	// Data is the clip's bytes, in Format. It is required.
+	Data []byte
+	// Format is the clip's encoding. It is required.
+	Format AudioFormat
+}
+
+func (InputAudio) contentPart() {}
+
+// AudioFormat is the encoding of an InputAudio clip.
+type AudioFormat string
+
+// The encodings an InputAudio clip takes.
+const (
+	// AudioFormatWAV is a RIFF WAVE file.
+	AudioFormatWAV AudioFormat = "wav"
+	// AudioFormatMP3 is an MPEG-1 Audio Layer III file.
+	AudioFormatMP3 AudioFormat = "mp3"
+)
 
 // OutputText is text the model produced: output_text.
 type OutputText struct {

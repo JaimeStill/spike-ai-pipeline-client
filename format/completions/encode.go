@@ -1,6 +1,7 @@
 package completions
 
 import (
+	"encoding/base64"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -13,7 +14,9 @@ import (
 // EncodeRequest encodes req, which the client has validated, as a Chat Completions request
 // body. Instructions become a leading system message, and each message item a message of its
 // role, its content a plain string when it is a single input_text or output_text part and an
-// array of text and refusal parts otherwise. MaxOutputTokens goes out as max_completion_tokens.
+// array of parts otherwise: text, refusal, image_url for an input_image (its URL and, when set,
+// detail), and input_audio for the audio extension (its bytes in base64, and format).
+// MaxOutputTokens goes out as max_completion_tokens.
 // Native's members, the native tier, are merged into the top level, and a member named like one
 // the typed fields set is refused. It adds no headers.
 func (*Format) EncodeRequest(req *protocol.Request, _ http.Header) ([]byte, error) {
@@ -63,7 +66,7 @@ func encodeItem(it protocol.Item) (message, error) {
 }
 
 // encodeContent encodes a message's content: a single text part as a plain string, anything
-// else as an array of parts.
+// else, such as a message with an image or audio part, as an array of parts.
 func encodeContent(parts []protocol.ContentPart) (jsontext.Value, error) {
 	if len(parts) == 1 {
 		switch p := parts[0].(type) {
@@ -82,6 +85,19 @@ func encodeContent(parts []protocol.ContentPart) (jsontext.Value, error) {
 			b, err = json.Marshal(textPart{Type: "text", Text: p.Text})
 		case protocol.OutputText:
 			b, err = json.Marshal(textPart{Type: "text", Text: p.Text})
+		case protocol.InputImage:
+			b, err = json.Marshal(imagePart{
+				Type:     "image_url",
+				ImageURL: imageURL{URL: p.ImageURL, Detail: string(p.Detail)},
+			})
+		case protocol.InputAudio:
+			b, err = json.Marshal(audioPart{
+				Type: "input_audio",
+				InputAudio: inputAudio{
+					Data:   base64.StdEncoding.EncodeToString(p.Data),
+					Format: string(p.Format),
+				},
+			})
 		case protocol.Refusal:
 			b, err = json.Marshal(refusalPart{Type: "refusal", Refusal: p.Refusal})
 		default:

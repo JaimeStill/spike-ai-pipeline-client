@@ -28,6 +28,31 @@ type textPart struct {
 	Text string `json:"text"`
 }
 
+// imagePart is a Chat Completions image content part.
+type imagePart struct {
+	Type     string   `json:"type"`
+	ImageURL imageURL `json:"image_url"`
+}
+
+// imageURL is an image part's image: its URL, a remote URL or a data URL, and its detail level,
+// omitted when unset.
+type imageURL struct {
+	URL    string `json:"url"`
+	Detail string `json:"detail,omitzero"`
+}
+
+// audioPart is a Chat Completions audio content part.
+type audioPart struct {
+	Type       string     `json:"type"`
+	InputAudio inputAudio `json:"input_audio"`
+}
+
+// inputAudio is an audio part's clip: its bytes in standard base64, and its format.
+type inputAudio struct {
+	Data   string `json:"data"`
+	Format string `json:"format"`
+}
+
 // refusalPart is a Chat Completions refusal content part.
 type refusalPart struct {
 	Type    string `json:"type"`
