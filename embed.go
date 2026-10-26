@@ -12,6 +12,7 @@ import (
 	"math"
 
 	"github.com/JaimeStill/spike-ai-pipeline-client/format"
+	"github.com/JaimeStill/spike-ai-pipeline-client/internal/native"
 )
 
 // embeddingsRoute is the OpenAI-compatible embeddings endpoint, relative to the base URL.
@@ -81,24 +82,15 @@ func encodeEmbeddingRequest(req EmbeddingRequest) ([]byte, error) {
 		return nil, errors.New("request has no model")
 	case len(req.Input) == 0:
 		return nil, errors.New("request has no input")
-	case len(req.Native) > 0 && (req.Native.Kind() != jsontext.KindBeginObject || !req.Native.IsValid()):
+	case !native.Valid(req.Native):
 		return nil, errors.New("request's native field isn't a JSON object with unique member names")
 	}
-	b, err := json.Marshal(embeddingRequest{
+	return native.Marshal(embeddingRequest{
 		Model:          req.Model,
 		Input:          req.Input,
 		EncodingFormat: "base64",
 		Native:         req.Native,
 	})
-	if err != nil {
-		var se *jsontext.SyntacticError
-		if errors.As(err, &se) && errors.Is(se.Err, jsontext.ErrDuplicateName) {
-			return nil, fmt.Errorf("native member %s clashes with a member the request sets",
-				se.JSONPointer.LastToken())
-		}
-		return nil, fmt.Errorf("encode request: %w", err)
-	}
-	return b, nil
 }
 
 // decodeEmbeddings decodes the body of a 2xx embeddings reply to a request of n inputs, placing

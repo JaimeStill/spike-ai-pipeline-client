@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/JaimeStill/spike-ai-pipeline-client/internal/native"
 	"github.com/JaimeStill/spike-ai-pipeline-client/protocol"
 )
 
@@ -94,19 +95,14 @@ func (*Format) EncodeRequest(req *protocol.Request, _ http.Header) ([]byte, erro
 			return nil, fmt.Errorf("completions: tool choice: %w", err)
 		}
 	}
-	b, err := json.Marshal(body)
+	b, err := native.Marshal(body)
 	if err != nil {
-		var se *jsontext.SyntacticError
-		if errors.As(err, &se) && errors.Is(se.Err, jsontext.ErrDuplicateName) {
-			return nil, fmt.Errorf("completions: native member %s clashes with a member the request sets",
-				se.JSONPointer.LastToken())
-		}
-		return nil, fmt.Errorf("completions: encode request: %w", err)
+		return nil, fmt.Errorf("completions: %w", err)
 	}
 	return b, nil
 }
 
-// encodeInput encodes the input items as messages, folding each run of assistant items into one
+// encodeInput encodes the input items as messages, joining each run of assistant items into one
 // assistant message, as EncodeRequest describes.
 func encodeInput(items []protocol.Item) ([]message, error) {
 	var messages []message

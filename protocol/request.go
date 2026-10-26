@@ -4,6 +4,8 @@ import (
 	"encoding/json/jsontext"
 	"errors"
 	"fmt"
+
+	"github.com/JaimeStill/spike-ai-pipeline-client/internal/native"
 )
 
 // Request is one request for a model's response: Open Responses' create-response body, in its
@@ -63,18 +65,25 @@ const (
 
 // Validate reports whether the request is one the model can describe, so a caller can check a
 // request before sending it; a client validates every request before anything is sent. It
-// refuses nil, no model, no input, an item or content part that isn't one of this package's by
-// value (a *Message is refused), a message with an unknown role or no content, a part its role
-// doesn't take, an image with no URL or an unknown detail, an audio clip with no data or an
-// unknown format, a reasoning effort the spec doesn't define, a text format that isn't one of
-// this package's by value, a json_schema format with no name, a name the spec doesn't allow, or
-// a schema that isn't a JSON object, a verbosity the spec doesn't define, a function_call with
-// no call id or name or with arguments that aren't JSON, a function_call_output with no call id, both output forms, or a part other than InputText, a
-// tool with no name, a name the spec doesn't allow, or a name another tool has, parameters that
-// aren't a JSON object, a tool choice that isn't one of this package's by value, an unknown
-// mode, a named function or allowed tool the request doesn't declare, an allowed_tools choice
-// with no tools, a negative MaxOutputTokens, and a Native that isn't a JSON object with unique
-// member names.
+// refuses:
+//
+//   - nil, no model, no input, or a negative MaxOutputTokens
+//   - an item, content part, tool choice, or text format that isn't one of this package's by
+//     value (a *Message is refused)
+//   - a message with an unknown role or no content, or a part its role doesn't take
+//   - an image with no URL or an unknown detail, or an audio clip with no data or an unknown
+//     format
+//   - a function_call with no call id or name, or with arguments that aren't JSON
+//   - a function_call_output with no call id, with both output forms, or with a part other than
+//     InputText
+//   - a tool with no name, a name the spec doesn't allow, a name another tool has, or
+//     parameters that aren't a JSON object
+//   - a tool choice of an unknown mode, naming a function the request doesn't declare, or of
+//     allowed_tools with no tools
+//   - a reasoning effort or a verbosity the spec doesn't define
+//   - a json_schema format with no name, a name the spec doesn't allow, or a schema that isn't
+//     a JSON object
+//   - a Native that isn't a JSON object with unique member names
 func (r *Request) Validate() error {
 	if err := r.validate(); err != nil {
 		return fmt.Errorf("protocol: %w", err)
@@ -119,7 +128,7 @@ func (r *Request) validate() error {
 			return fmt.Errorf("tool choice: %w", err)
 		}
 	}
-	if len(r.Native) > 0 && (r.Native.Kind() != jsontext.KindBeginObject || !r.Native.IsValid()) {
+	if !native.Valid(r.Native) {
 		return errors.New("request's native field isn't a JSON object with unique member names")
 	}
 	return nil
