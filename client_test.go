@@ -10,20 +10,21 @@ import (
 	"testing"
 
 	client "github.com/JaimeStill/spike-ai-pipeline-client"
-	"github.com/JaimeStill/spike-ai-pipeline-client/chatcompletions"
+	"github.com/JaimeStill/spike-ai-pipeline-client/format/completions"
 	"github.com/JaimeStill/spike-ai-pipeline-client/internal/clienttest"
+	"github.com/JaimeStill/spike-ai-pipeline-client/protocol"
 )
 
 // okReply is a Chat Completions reply that decodes to a completed response.
 const okReply = `{"choices":[{"message":{"role":"assistant","content":"Paris"},"finish_reason":"stop"}]}`
 
 // hello is a minimal valid request.
-func hello() *client.Request {
-	return &client.Request{
+func hello() *protocol.Request {
+	return &protocol.Request{
 		Model: "m",
-		Input: []client.Item{client.Message{
-			Role:    client.RoleUser,
-			Content: []client.ContentPart{client.InputText{Text: "Capital of France?"}},
+		Input: []protocol.Item{protocol.Message{
+			Role:    protocol.RoleUser,
+			Content: []protocol.ContentPart{protocol.InputText{Text: "Capital of France?"}},
 		}},
 	}
 }
@@ -36,7 +37,7 @@ func newClient(t *testing.T, cfg client.Config) *client.Client {
 		cfg.HTTP = http.DefaultClient
 	}
 	if cfg.Format == nil {
-		cfg.Format = chatcompletions.New()
+		cfg.Format = completions.New()
 	}
 	c, err := client.New(cfg)
 	if err != nil {
@@ -46,7 +47,7 @@ func newClient(t *testing.T, cfg client.Config) *client.Client {
 }
 
 func TestNewRefusesConfig(t *testing.T) {
-	format := chatcompletions.New()
+	format := completions.New()
 	cases := []struct {
 		name string
 		cfg  client.Config
@@ -209,7 +210,7 @@ func TestRespondTokenErrorSendsNothing(t *testing.T) {
 
 // TestRespondAPIError covers what the Client makes of a non-2xx reply: an *APIError with the
 // status and the whole body, its text built from the details the Format decoded or, without a
-// message, from the start of the body. What the Format decodes is chatcompletions' test.
+// message, from the start of the body. What the Format decodes is completions' test.
 func TestRespondAPIError(t *testing.T) {
 	long := strings.Repeat("x", 600)
 	cases := []struct {
@@ -304,48 +305,18 @@ func TestRespondWrapsCancelledContext(t *testing.T) {
 	}
 }
 
-func TestRespondRefusesRequest(t *testing.T) {
-	user := func(parts ...client.ContentPart) client.Message {
-		return client.Message{Role: client.RoleUser, Content: parts}
-	}
-	with := func(edit func(*client.Request)) *client.Request {
-		r := hello()
-		edit(r)
-		return r
-	}
+// TestRespondRefusesInvalidRequest covers when Respond validates: before the token source is
+// called or anything is sent. Which requests Validate refuses is protocol's test.
+func TestRespondRefusesInvalidRequest(t *testing.T) {
+	noModel := hello()
+	noModel.Model = ""
 	cases := []struct {
 		name string
-		req  *client.Request
+		req  *protocol.Request
 		want string
 	}{
 		{"nil", nil, "no request"},
-		{"no model", with(func(r *client.Request) { r.Model = "" }), "no model"},
-		{"no input", with(func(r *client.Request) { r.Input = nil }), "no input"},
-		{"nil item", with(func(r *client.Request) { r.Input = []client.Item{nil} }), "unsupported item"},
-		{"pointer item", with(func(r *client.Request) {
-			r.Input = []client.Item{&client.Message{Role: client.RoleUser, Content: []client.ContentPart{client.InputText{Text: "hi"}}}}
-		}), "unsupported item *client.Message"},
-		{"unknown role", with(func(r *client.Request) {
-			r.Input = []client.Item{client.Message{Role: "tool", Content: []client.ContentPart{client.InputText{Text: "hi"}}}}
-		}), `unknown role "tool"`},
-		{"unknown role, no content", with(func(r *client.Request) {
-			r.Input = []client.Item{client.Message{Role: "tool"}}
-		}), `unknown role "tool"`},
-		{"no content", with(func(r *client.Request) { r.Input = []client.Item{user()} }), "has no content"},
-		{"nil part", with(func(r *client.Request) { r.Input = []client.Item{user(nil)} }), "unsupported part"},
-		{"output part from user", with(func(r *client.Request) {
-			r.Input = []client.Item{user(client.OutputText{Text: "hi"})}
-		}), "unsupported part client.OutputText"},
-		{"refusal from system", with(func(r *client.Request) {
-			r.Input = []client.Item{client.Message{Role: client.RoleSystem, Content: []client.ContentPart{client.Refusal{Refusal: "no"}}}}
-		}), "unsupported part client.Refusal"},
-		{"input part from assistant", with(func(r *client.Request) {
-			r.Input = []client.Item{client.Message{Role: client.RoleAssistant, Content: []client.ContentPart{client.InputText{Text: "hi"}}}}
-		}), "unsupported part client.InputText"},
-		{"negative max output tokens", with(func(r *client.Request) { r.MaxOutputTokens = -1 }), "negative"},
-		{"native array", with(func(r *client.Request) { r.Native = []byte(`[1]`) }), "native field"},
-		{"native invalid", with(func(r *client.Request) { r.Native = []byte(`{"a":`) }), "native field"},
-		{"native duplicate", with(func(r *client.Request) { r.Native = []byte(`{"a":1,"a":2}`) }), "native field"},
+		{"no model", noModel, "no model"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

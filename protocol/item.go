@@ -1,4 +1,4 @@
-package client
+package protocol
 
 // Item is one entry of a request's input or a response's output, as Open Responses defines
 // items. The set is closed: the item types are this package's, and an item is one of them by

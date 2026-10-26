@@ -1,4 +1,4 @@
-package client
+package protocol
 
 import (
 	"encoding/json/jsontext"
@@ -26,10 +26,20 @@ type Request struct {
 	Native jsontext.Value
 }
 
-// validate refuses a request the model can't describe: nil, no model, no input, an item or
-// content part that isn't one of the package's by value, a message with an unknown role or no
-// content, a part its role doesn't take, a negative MaxOutputTokens, or a Native that isn't a
-// JSON object with unique member names.
+// Validate reports whether the request is one the model can describe, so a caller can check a
+// request before sending it; a client validates every request before anything is sent. It
+// refuses nil, no model, no input, an item or content part that isn't one of this package's by
+// value (a *Message is refused), a message with an unknown role or no content, a part its role
+// doesn't take, a negative MaxOutputTokens, and a Native that isn't a JSON object with unique
+// member names.
+func (r *Request) Validate() error {
+	if err := r.validate(); err != nil {
+		return fmt.Errorf("protocol: %w", err)
+	}
+	return nil
+}
+
+// validate is Validate without the package's prefix on its error.
 func (r *Request) validate() error {
 	switch {
 	case r == nil:

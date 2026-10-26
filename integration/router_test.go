@@ -12,7 +12,8 @@ import (
 	"time"
 
 	client "github.com/JaimeStill/spike-ai-pipeline-client"
-	"github.com/JaimeStill/spike-ai-pipeline-client/chatcompletions"
+	"github.com/JaimeStill/spike-ai-pipeline-client/format"
+	"github.com/JaimeStill/spike-ai-pipeline-client/format/completions"
 )
 
 // Set A's roles: the model each test sends to.
@@ -22,9 +23,9 @@ const chatModel = "ggml-org/gpt-oss-120b-GGUF:MXFP4"
 // which on a reasoning model such as gpt-oss-120b takes tens of seconds.
 const requestTimeout = 3 * time.Minute
 
-// newClient returns a Client of the router SPIKE_ROUTER_URL names, speaking format, with
+// newClient returns a Client of the router SPIKE_ROUTER_URL names, speaking f, with
 // autoload=false on every request. It skips t when SPIKE_ROUTER_URL is unset.
-func newClient(t *testing.T, format client.Format) *client.Client {
+func newClient(t *testing.T, f format.Format) *client.Client {
 	t.Helper()
 	base := os.Getenv("SPIKE_ROUTER_URL")
 	if base == "" {
@@ -34,7 +35,7 @@ func newClient(t *testing.T, format client.Format) *client.Client {
 		BaseURL: strings.TrimSuffix(base, "/") + "/v1",
 		Query:   url.Values{"autoload": {"false"}},
 		HTTP:    &http.Client{},
-		Format:  format,
+		Format:  f,
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -52,5 +53,5 @@ func requestContext(t *testing.T) context.Context {
 // chatCompletions returns a Client of the router speaking Chat Completions.
 func chatCompletions(t *testing.T) *client.Client {
 	t.Helper()
-	return newClient(t, chatcompletions.New())
+	return newClient(t, completions.New())
 }

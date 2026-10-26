@@ -9,36 +9,37 @@ import (
 	"testing"
 
 	client "github.com/JaimeStill/spike-ai-pipeline-client"
+	"github.com/JaimeStill/spike-ai-pipeline-client/protocol"
 )
 
 // userText is a user message of one input_text part.
-func userText(s string) client.Message {
-	return client.Message{Role: client.RoleUser, Content: []client.ContentPart{client.InputText{Text: s}}}
+func userText(s string) protocol.Message {
+	return protocol.Message{Role: protocol.RoleUser, Content: []protocol.ContentPart{protocol.InputText{Text: s}}}
 }
 
 func TestChat(t *testing.T) {
 	c := chatCompletions(t)
-	resp, err := c.Respond(requestContext(t), &client.Request{
+	resp, err := c.Respond(requestContext(t), &protocol.Request{
 		Model:        chatModel,
 		Instructions: "Answer in one word.",
-		Input:        []client.Item{userText("What is the capital of France?")},
+		Input:        []protocol.Item{userText("What is the capital of France?")},
 	})
 	if err != nil {
 		t.Fatalf("Respond: %v", err)
 	}
-	if resp.Status != client.StatusCompleted {
+	if resp.Status != protocol.StatusCompleted {
 		t.Fatalf("Status = %q (%+v), want completed", resp.Status, resp.IncompleteDetails)
 	}
 	if len(resp.Output) != 1 {
 		t.Fatalf("Output has %d items, want 1 message: %#v", len(resp.Output), resp.Output)
 	}
-	m, ok := resp.Output[0].(client.Message)
-	if !ok || m.Role != client.RoleAssistant || m.Status != client.StatusCompleted {
+	m, ok := resp.Output[0].(protocol.Message)
+	if !ok || m.Role != protocol.RoleAssistant || m.Status != protocol.StatusCompleted {
 		t.Fatalf("Output[0] = %#v, want a completed assistant message", resp.Output[0])
 	}
 	var text strings.Builder
 	for _, p := range m.Content {
-		if o, ok := p.(client.OutputText); ok {
+		if o, ok := p.(protocol.OutputText); ok {
 			text.WriteString(o.Text)
 		}
 	}
@@ -54,16 +55,16 @@ func TestChat(t *testing.T) {
 func TestChatIncompleteAtMaxOutputTokens(t *testing.T) {
 	c := chatCompletions(t)
 	const bound = 16
-	resp, err := c.Respond(requestContext(t), &client.Request{
+	resp, err := c.Respond(requestContext(t), &protocol.Request{
 		Model:           chatModel,
-		Input:           []client.Item{userText("Write a long essay on the history of Paris.")},
+		Input:           []protocol.Item{userText("Write a long essay on the history of Paris.")},
 		MaxOutputTokens: bound,
 	})
 	if err != nil {
 		t.Fatalf("Respond: %v", err)
 	}
-	want := client.IncompleteDetails{Reason: client.ReasonMaxOutputTokens}
-	if resp.Status != client.StatusIncomplete || resp.IncompleteDetails == nil || *resp.IncompleteDetails != want {
+	want := protocol.IncompleteDetails{Reason: protocol.ReasonMaxOutputTokens}
+	if resp.Status != protocol.StatusIncomplete || resp.IncompleteDetails == nil || *resp.IncompleteDetails != want {
 		t.Errorf("Status = %q, IncompleteDetails = %+v; want incomplete, %+v", resp.Status, resp.IncompleteDetails, want)
 	}
 	if resp.Usage.OutputTokens > bound {
@@ -73,9 +74,9 @@ func TestChatIncompleteAtMaxOutputTokens(t *testing.T) {
 
 func TestChatUnknownModelIsAPIError(t *testing.T) {
 	c := chatCompletions(t)
-	_, err := c.Respond(requestContext(t), &client.Request{
+	_, err := c.Respond(requestContext(t), &protocol.Request{
 		Model: "spike-ai-pipeline/no-such-model",
-		Input: []client.Item{userText("Hello.")},
+		Input: []protocol.Item{userText("Hello.")},
 	})
 	var apiErr *client.APIError
 	if !errors.As(err, &apiErr) {

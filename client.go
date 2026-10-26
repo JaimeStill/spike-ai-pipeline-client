@@ -9,6 +9,9 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+
+	"github.com/JaimeStill/spike-ai-pipeline-client/format"
+	"github.com/JaimeStill/spike-ai-pipeline-client/protocol"
 )
 
 // TokenSource returns the bearer token for one request. The Client calls it once per request, so
@@ -30,8 +33,8 @@ type Config struct {
 	// the library sets no timeout, retry, or limit of its own.
 	HTTP *http.Client
 	// Format is the wire format Respond speaks, chosen by its constructor, such as
-	// chatcompletions.New(). It is required.
-	Format Format
+	// completions.New(). It is required.
+	Format format.Format
 }
 
 // Client makes requests of one endpoint in one wire format. It is safe for concurrent use when
@@ -41,7 +44,7 @@ type Client struct {
 	query  string
 	token  TokenSource
 	http   *http.Client
-	format Format
+	format format.Format
 }
 
 // New returns a Client for cfg. It makes no request, so it reports only a Config that can't
@@ -82,11 +85,12 @@ func New(cfg Config) (*Client, error) {
 	}, nil
 }
 
-// Respond sends req in the Client's format and returns the model's response. It validates req,
-// and the format encodes it, before the token source is called or anything is sent. A non-2xx
-// reply is an *APIError; a transport failure or a cancelled ctx is returned wrapped.
-func (c *Client) Respond(ctx context.Context, req *Request) (*Response, error) {
-	if err := req.validate(); err != nil {
+// Respond sends req in the Client's format and returns the model's response. It validates req
+// with its Validate method, and the format encodes it, before the token source is called or
+// anything is sent. A non-2xx reply is an *APIError; a transport failure or a cancelled ctx is
+// returned wrapped.
+func (c *Client) Respond(ctx context.Context, req *protocol.Request) (*protocol.Response, error) {
+	if err := req.Validate(); err != nil {
 		return nil, fmt.Errorf("client: respond: %w", err)
 	}
 	header := make(http.Header)

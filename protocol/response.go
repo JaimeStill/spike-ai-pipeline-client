@@ -1,4 +1,4 @@
-package client
+package protocol
 
 // Response is a model's response: Open Responses' response object, in its stateless subset.
 type Response struct {
