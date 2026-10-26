@@ -2,11 +2,11 @@ package completions
 
 import (
 	"encoding/base64"
-	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
 
+	"github.com/JaimeStill/spike-ai-pipeline-client/format"
 	"github.com/JaimeStill/spike-ai-pipeline-client/protocol"
 )
 
@@ -105,30 +105,8 @@ func sealEnvelope(e envelope) (string, error) {
 	return envelopePrefix + base64.StdEncoding.EncodeToString(b), nil
 }
 
-// DecodeError decodes an OpenAI-style error body, {"error": {"message", "type", "code"}}, where
-// code is a string or a number. An error that is a bare string is the message. A body of any
-// other shape gives nothing.
+// DecodeError decodes an OpenAI-style error body with format.DecodeOpenAIError, which
+// describes the shapes it reads.
 func (*Format) DecodeError(body []byte) (message, typ, code string) {
-	var wire errorBody
-	if json.Unmarshal(body, &wire) != nil {
-		return "", "", ""
-	}
-	switch wire.Error.Kind() {
-	case jsontext.KindString:
-		_ = json.Unmarshal(wire.Error, &message)
-		return message, "", ""
-	case jsontext.KindBeginObject:
-		var e errorObject
-		// A member of an unexpected type leaves the members decoded before it, which are still
-		// the best account of the error there is.
-		_ = json.Unmarshal(wire.Error, &e)
-		switch e.Code.Kind() {
-		case jsontext.KindString:
-			_ = json.Unmarshal(e.Code, &code)
-		case jsontext.KindNumber:
-			code = string(e.Code)
-		}
-		return e.Message, e.Type, code
-	}
-	return "", "", ""
+	return format.DecodeOpenAIError(body)
 }

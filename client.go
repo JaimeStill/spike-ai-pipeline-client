@@ -98,7 +98,7 @@ func (c *Client) Generate(ctx context.Context, req *protocol.Request) (*protocol
 	if err != nil {
 		return nil, fmt.Errorf("client: generate: %w", err)
 	}
-	reply, err := c.post(ctx, c.format.Route(), header, body)
+	reply, err := c.post(ctx, c.format.Route(), header, body, c.format.DecodeError)
 	if err != nil {
 		return nil, fmt.Errorf("client: generate: %w", err)
 	}
@@ -118,8 +118,11 @@ func (c *Client) endpoint(route string) string {
 }
 
 // post sends body as a JSON POST to route, with header and the bearer token, and returns the
-// reply's body. A non-2xx reply is an *APIError, its details decoded by the Client's format.
-func (c *Client) post(ctx context.Context, route string, header http.Header, body []byte) ([]byte, error) {
+// reply's body. A non-2xx reply is an *APIError, its details decoded by decodeError: the
+// Client's format's for Generate, and the OpenAI-style decoder for the operations outside the
+// Format.
+func (c *Client) post(ctx context.Context, route string, header http.Header, body []byte,
+	decodeError func(body []byte) (message, typ, code string)) ([]byte, error) {
 	token := ""
 	if c.token != nil {
 		t, err := c.token(ctx)
@@ -148,7 +151,7 @@ func (c *Client) post(ctx context.Context, route string, header http.Header, bod
 		// A failed read leaves the part of the body that was read, which is still the best
 		// account of the error there is.
 		e := &APIError{Status: resp.StatusCode, Body: reply}
-		e.Message, e.Type, e.Code = c.format.DecodeError(reply)
+		e.Message, e.Type, e.Code = decodeError(reply)
 		return nil, e
 	}
 	if err != nil {

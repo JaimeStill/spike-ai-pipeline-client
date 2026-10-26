@@ -166,19 +166,6 @@ type response struct {
 	} `json:"usage"`
 }
 
-// errorBody is an OpenAI-style error body. Error is an errorObject or, from some servers, a bare
-// string.
-type errorBody struct {
-	Error jsontext.Value `json:"error"`
-}
-
-// errorObject is the object form of an error body's error. Code is a string or a number.
-type errorObject struct {
-	Message string         `json:"message"`
-	Type    string         `json:"type"`
-	Code    jsontext.Value `json:"code"`
-}
-
 // envelopePrefix opens every envelope this format writes: the implementor slug, the format, and
 // the envelope's version. A Reasoning item's encrypted_content without it was written by another
 // format, or by another version of this one, and isn't this format's to read.

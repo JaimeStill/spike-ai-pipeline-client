@@ -3,7 +3,6 @@ package completions_test
 import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
-	"errors"
 	"net/http"
 	"reflect"
 	"strings"
@@ -899,45 +898,6 @@ func TestDecodeRefusesReply(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("Generate error = %q, want it to contain %q", err, tc.want)
-			}
-		})
-	}
-}
-
-// TestDecodeError covers the details an OpenAI-style error body gives the *APIError a non-2xx
-// reply comes back as.
-func TestDecodeError(t *testing.T) {
-	cases := []struct {
-		name               string
-		reply              string
-		message, typ, code string
-	}{
-		{"numeric code", `{"error":{"code":400,"message":"model 'x' not found","type":"invalid_request_error"}}`,
-			"model 'x' not found", "invalid_request_error", "400"},
-		{"string code", `{"error":{"message":"slow down","type":"rate_limit","code":"rate_limit_exceeded","param":null}}`,
-			"slow down", "rate_limit", "rate_limit_exceeded"},
-		{"message only", `{"error":{"message":"boom"}}`, "boom", "", ""},
-		{"string error", `{"error":"loading model"}`, "loading model", "", ""},
-		{"members before a mistyped one", `{"error":{"message":"boom","type":7,"code":"c"}}`, "boom", "", ""},
-		{"error of another shape", `{"error":42}`, "", "", ""},
-		{"no error member", `{"detail":"boom"}`, "", "", ""},
-		{"not JSON", "upstream down\n", "", "", ""},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			srv := clienttest.NewServer(t, http.StatusBadRequest, tc.reply)
-			c, err := client.New(client.Config{BaseURL: srv.URL, HTTP: http.DefaultClient, Format: completions.New()})
-			if err != nil {
-				t.Fatalf("New: %v", err)
-			}
-			_, err = c.Generate(t.Context(), &protocol.Request{Model: "m", Input: []protocol.Item{text(protocol.RoleUser, "hi")}})
-			apiErr, ok := errors.AsType[*client.APIError](err)
-			if !ok {
-				t.Fatalf("Generate error = %v, want an *APIError", err)
-			}
-			if apiErr.Message != tc.message || apiErr.Type != tc.typ || apiErr.Code != tc.code {
-				t.Errorf("APIError = {%q %q %q}, want {%q %q %q}",
-					apiErr.Message, apiErr.Type, apiErr.Code, tc.message, tc.typ, tc.code)
 			}
 		})
 	}

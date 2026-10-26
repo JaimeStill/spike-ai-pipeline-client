@@ -210,7 +210,7 @@ func TestGenerateTokenErrorSendsNothing(t *testing.T) {
 
 // TestGenerateAPIError covers what the Client makes of a non-2xx reply: an *APIError with the
 // status and the whole body, its text built from the details the Format decoded or, without a
-// message, from the start of the body. What the Format decodes is completions' test.
+// message, from the start of the body. What the OpenAI-style body gives is format's test.
 func TestGenerateAPIError(t *testing.T) {
 	long := strings.Repeat("x", 600)
 	cases := []struct {

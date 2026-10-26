@@ -60,5 +60,12 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
   produced, which the caller decodes. Chat Completions sends the format as `response_format`
   (`{"type":"text"}`, or `{"type":"json_schema","json_schema":{...}}`) and the verbosity as
   `verbosity`.
+- Embeddings, beside the protocol and outside the `Format`, on the OpenAI-compatible shape:
+  `Client.Embed` sends an `EmbeddingRequest` (model, one or more inputs, and a `Native` raw-JSON
+  object, the native tier) to the `embeddings` route and returns `Embeddings`, one `[]float32`
+  per input in input order, placed by each reply item's index, and `EmbeddingUsage` (prompt and
+  total tokens). The vectors travel as base64 of little-endian float32; a reply that doesn't
+  give exactly one whole-float32 vector per input is an error. `format.DecodeOpenAIError`
+  decodes the OpenAI-style error body, now shared by Chat Completions and embeddings.
 
 [Unreleased]: https://github.com/JaimeStill/spike-ai-pipeline-client/commits/main
