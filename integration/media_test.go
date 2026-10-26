@@ -51,9 +51,15 @@ func TestAudioInChat(t *testing.T) {
 	}
 	text := completedText(t, resp)
 	t.Logf("%s: %q", audioModel, text)
-	// phrase.wav says "The access code is seven four two nine." The code may come back as digits
-	// or words, spaced or not: compared with everything but letters and digits stripped, either
-	// form passes.
+	assertAccessCode(t, text)
+}
+
+// assertAccessCode fails t unless text, a transcript of phrase.wav, carries its code.
+// phrase.wav says "The access code is seven four two nine." The code may come back as digits or
+// words, spaced or not: compared with everything but letters and digits stripped, either form
+// passes.
+func assertAccessCode(t *testing.T, text string) {
+	t.Helper()
 	got := strings.Map(func(r rune) rune {
 		if unicode.IsLetter(r) || unicode.IsDigit(r) {
 			return unicode.ToLower(r)

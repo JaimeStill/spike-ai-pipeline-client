@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/binary"
@@ -62,7 +63,7 @@ func (c *Client) Embed(ctx context.Context, req EmbeddingRequest) (*Embeddings, 
 	if err != nil {
 		return nil, fmt.Errorf("client: embed: %w", err)
 	}
-	reply, err := c.post(ctx, embeddingsRoute, nil, body, format.DecodeOpenAIError)
+	reply, err := c.post(ctx, embeddingsRoute, nil, bytes.NewReader(body), "application/json", format.DecodeOpenAIError)
 	if err != nil {
 		return nil, fmt.Errorf("client: embed: %w", err)
 	}

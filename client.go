@@ -98,7 +98,7 @@ func (c *Client) Generate(ctx context.Context, req *protocol.Request) (*protocol
 	if err != nil {
 		return nil, fmt.Errorf("client: generate: %w", err)
 	}
-	reply, err := c.post(ctx, c.format.Route(), header, body, c.format.DecodeError)
+	reply, err := c.post(ctx, c.format.Route(), header, bytes.NewReader(body), "application/json", c.format.DecodeError)
 	if err != nil {
 		return nil, fmt.Errorf("client: generate: %w", err)
 	}
@@ -117,11 +117,12 @@ func (c *Client) endpoint(route string) string {
 	return u.String()
 }
 
-// post sends body as a JSON POST to route, with header and the bearer token, and returns the
-// reply's body. A non-2xx reply is an *APIError, its details decoded by decodeError: the
-// Client's format's for Generate, and the OpenAI-style decoder for the operations outside the
-// Format.
-func (c *Client) post(ctx context.Context, route string, header http.Header, body []byte,
+// post sends body as a POST of contentType to route, with header and the bearer token, and
+// returns the reply's body. The token source is called before the request is made, so a source
+// error sends nothing. A body of unknown length, such as a pipe, goes chunked. A non-2xx reply is
+// an *APIError, its details decoded by decodeError: the Client's format's for Generate, and the
+// OpenAI-style decoder for the operations outside the Format.
+func (c *Client) post(ctx context.Context, route string, header http.Header, body io.Reader, contentType string,
 	decodeError func(body []byte) (message, typ, code string)) ([]byte, error) {
 	token := ""
 	if c.token != nil {
@@ -131,12 +132,12 @@ func (c *Client) post(ctx context.Context, route string, header http.Header, bod
 		}
 		token = t
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint(route), bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint(route), body)
 	if err != nil {
 		return nil, err
 	}
 	maps.Copy(req.Header, header)
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Accept", "application/json")
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)

@@ -6,8 +6,9 @@
 // item model in its stateless subset; package format is the contract a wire format meets; each
 // wire format is a package below it, named for the endpoint it targets, such as
 // format/completions; and this package is the transport, which sends a protocol.Request in the
-// format chosen by its constructor at the caller's composition root. Embeddings sit beside the
-// protocol, outside the Format, on the OpenAI-compatible shape whatever format the Client speaks.
+// format chosen by its constructor at the caller's composition root. Embeddings and transcription
+// sit beside the protocol, outside the Format, on the OpenAI-compatible shape whatever format the
+// Client speaks.
 //
 // The library ships no policy: no default model, token budget, timeout, retry, or size limit.
 // The caller's http.Client and context carry them.
@@ -23,5 +24,11 @@
 //   - [EmbeddingRequest] is an embedding model, its inputs, and a native-tier field.
 //   - [Embeddings] is one vector per input, in input order, and usage.
 //   - [EmbeddingUsage] counts the tokens an embedding request took.
+//   - [Client.Transcribe] streams a TranscriptionRequest's clip to the OpenAI-compatible
+//     transcription endpoint as a multipart upload.
+//   - [TranscriptionRequest] is an audio model, the clip as a reader and its file name, and
+//     the optional language and prompt.
+//   - [Transcription] is a clip's transcript and usage.
+//   - [TranscriptionUsage] counts the tokens a transcription took.
 //   - [APIError] is a non-2xx reply, matched with errors.As.
 package client

@@ -67,5 +67,13 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
   total tokens). The vectors travel as base64 of little-endian float32; a reply that doesn't
   give exactly one whole-float32 vector per input is an error. `format.DecodeOpenAIError`
   decodes the OpenAI-style error body, now shared by Chat Completions and embeddings.
+- Transcription, beside the protocol and outside the `Format`: `Client.Transcribe` uploads a
+  `TranscriptionRequest` (model, the clip as any `io.Reader` with its file name, and an optional
+  language and prompt) to the `audio/transcriptions` route as multipart/form-data with
+  `response_format` json, and returns a `Transcription`, the text and `TranscriptionUsage`
+  (input, output, and total tokens). The upload streams through a pipe, chunked, so the clip is
+  never held whole in memory; a cancelled context or a failed request stops it, and
+  `Transcribe` returns only once it has stopped reading the clip. A clip read error is returned
+  wrapped. llama.cpp b11669 answers json alone, so the reply carries no timestamps.
 
 [Unreleased]: https://github.com/JaimeStill/spike-ai-pipeline-client/commits/main
