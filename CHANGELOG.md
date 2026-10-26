@@ -19,9 +19,10 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
   allow. A `Response` carries the output items, status, `IncompleteDetails`, and `Usage`. A
   request's `Native` raw-JSON object, the native tier, is merged into the wire body's top level,
   and a member that clashes with a typed field is refused.
-- Message content: `InputText`, `InputImage` (an image URL, remote or data, with an
-  `ImageDetail`; `DataURL` builds a base64 data URL from bytes and a media type), and on output
-  `OutputText` and `Refusal`.
+- The `Message` item, content parts from a `Role` (user, system, developer, or assistant):
+  `InputText`, `InputImage` (an image URL, remote or data, with an `ImageDetail`; `DataURL`
+  builds a base64 data URL from bytes and a media type), and on output `OutputText` and
+  `Refusal`.
 - Audio input, the first client extension: `InputAudio`, a clip's bytes and its `AudioFormat`
   (wav or mp3), on user messages, with the wire type `spike-ai-pipeline:input_audio` until the
   spec adds an audio input part. The `protocol` package documentation lists the client

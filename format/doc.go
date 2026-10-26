@@ -1,5 +1,5 @@
-// Package format is the contract a wire format meets: [Format] converts the protocol package's
-// request and response model to and from one API's wire shape. It imports only protocol; each
+// Package format is the contract a wire format meets: [Format] encodes the protocol package's
+// request in one API's wire shape and decodes the reply into its response. It imports only protocol; each
 // implementation is a package below it, named for the endpoint it targets, such as completions
 // for Chat Completions, and none imports the client.
 //

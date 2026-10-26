@@ -1,8 +1,9 @@
 // Package protocol is the client's request and response model: Open Responses' item model
 // (https://www.openresponses.org, spec 2026-04-24), in its stateless subset, using the spec's
 // names. A Request of input items goes in and a Response of output items comes out; a wire
-// format converts them to and from its API's shape, and the client sends them. The package
-// imports neither, so a caller builds requests and items without the transport.
+// format encodes the request in its API's shape and decodes the reply, and the client sends
+// them. The package imports neither, so a caller builds requests and items without the
+// transport.
 //
 // The standard tier is the spec's model. The native tier is a Request's Native field, raw JSON
 // merged into the wire body's top level as it is, for what the standard tier doesn't cover.
@@ -29,7 +30,7 @@
 //   - [TextFormat] is the form of the model's output_text, a closed set.
 //   - [PlainTextFormat] has the model answer in plain text, the text format.
 //   - [JSONSchemaFormat] has the model answer with JSON a schema describes, the json_schema
-//     format; the caller decodes the output_text.
+//     format.
 //   - [Verbosity] is how much detail the model's text gives: [VerbosityLow],
 //     [VerbosityMedium], or [VerbosityHigh].
 //   - [ReasoningParam] configures the model's reasoning: its effort.

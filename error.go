@@ -17,7 +17,7 @@ type APIError struct {
 	// Status is the HTTP status code.
 	Status int
 	// Message is the endpoint's error message, when Body gave one: decoded by the Client's
-	// Format for Generate, and as an OpenAI-style error body for Embed.
+	// Format for Generate, and as an OpenAI-style error body for Embed and Transcribe.
 	Message string
 	// Type is the endpoint's error type, such as "invalid_request_error", when it gave one.
 	Type string
