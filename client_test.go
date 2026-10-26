@@ -92,7 +92,7 @@ func TestNewMakesNoRequest(t *testing.T) {
 	}
 }
 
-func TestRespondJoinsRouteWithOneSlash(t *testing.T) {
+func TestGenerateJoinsRouteWithOneSlash(t *testing.T) {
 	for base, want := range map[string]string{
 		"":     "/chat/completions",
 		"/":    "/chat/completions",
@@ -102,8 +102,8 @@ func TestRespondJoinsRouteWithOneSlash(t *testing.T) {
 		t.Run(base, func(t *testing.T) {
 			srv := clienttest.NewServer(t, http.StatusOK, okReply)
 			c := newClient(t, client.Config{BaseURL: srv.URL + base})
-			if _, err := c.Respond(t.Context(), hello()); err != nil {
-				t.Fatalf("Respond: %v", err)
+			if _, err := c.Generate(t.Context(), hello()); err != nil {
+				t.Fatalf("Generate: %v", err)
 			}
 			got := srv.Only(t)
 			if got.Method != http.MethodPost || got.Path != want {
@@ -113,25 +113,25 @@ func TestRespondJoinsRouteWithOneSlash(t *testing.T) {
 	}
 }
 
-func TestRespondCarriesQueryCopiedAtNew(t *testing.T) {
+func TestGenerateCarriesQueryCopiedAtNew(t *testing.T) {
 	srv := clienttest.NewServer(t, http.StatusOK, okReply)
 	query := url.Values{"autoload": {"false"}}
 	c := newClient(t, client.Config{BaseURL: srv.URL + "/v1", Query: query})
 	query.Set("autoload", "true")
 	query.Add("extra", "1")
-	if _, err := c.Respond(t.Context(), hello()); err != nil {
-		t.Fatalf("Respond: %v", err)
+	if _, err := c.Generate(t.Context(), hello()); err != nil {
+		t.Fatalf("Generate: %v", err)
 	}
 	if got := srv.Only(t).RawQuery; got != "autoload=false" {
 		t.Errorf("query = %q, want autoload=false", got)
 	}
 }
 
-func TestRespondSendsJSONHeaders(t *testing.T) {
+func TestGenerateSendsJSONHeaders(t *testing.T) {
 	srv := clienttest.NewServer(t, http.StatusOK, okReply)
 	c := newClient(t, client.Config{BaseURL: srv.URL})
-	if _, err := c.Respond(t.Context(), hello()); err != nil {
-		t.Fatalf("Respond: %v", err)
+	if _, err := c.Generate(t.Context(), hello()); err != nil {
+		t.Fatalf("Generate: %v", err)
 	}
 	h := srv.Only(t).Header
 	for k, want := range map[string]string{"Content-Type": "application/json", "Accept": "application/json"} {
@@ -141,7 +141,7 @@ func TestRespondSendsJSONHeaders(t *testing.T) {
 	}
 }
 
-func TestRespondToken(t *testing.T) {
+func TestGenerateToken(t *testing.T) {
 	cases := []struct {
 		name  string
 		token client.TokenSource
@@ -155,8 +155,8 @@ func TestRespondToken(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := clienttest.NewServer(t, http.StatusOK, okReply)
 			c := newClient(t, client.Config{BaseURL: srv.URL, Token: tc.token})
-			if _, err := c.Respond(t.Context(), hello()); err != nil {
-				t.Fatalf("Respond: %v", err)
+			if _, err := c.Generate(t.Context(), hello()); err != nil {
+				t.Fatalf("Generate: %v", err)
 			}
 			got := srv.Only(t).Header.Values("Authorization")
 			if strings.Join(got, "|") != strings.Join(tc.want, "|") {
@@ -166,7 +166,7 @@ func TestRespondToken(t *testing.T) {
 	}
 }
 
-func TestRespondCallsTokenSourceOncePerRequest(t *testing.T) {
+func TestGenerateCallsTokenSourceOncePerRequest(t *testing.T) {
 	srv := clienttest.NewServer(t, http.StatusOK, okReply)
 	calls := 0
 	c := newClient(t, client.Config{
@@ -177,8 +177,8 @@ func TestRespondCallsTokenSourceOncePerRequest(t *testing.T) {
 		},
 	})
 	for range 2 {
-		if _, err := c.Respond(t.Context(), hello()); err != nil {
-			t.Fatalf("Respond: %v", err)
+		if _, err := c.Generate(t.Context(), hello()); err != nil {
+			t.Fatalf("Generate: %v", err)
 		}
 	}
 	if calls != 2 {
@@ -192,26 +192,26 @@ func TestRespondCallsTokenSourceOncePerRequest(t *testing.T) {
 	}
 }
 
-func TestRespondTokenErrorSendsNothing(t *testing.T) {
+func TestGenerateTokenErrorSendsNothing(t *testing.T) {
 	srv := clienttest.NewServer(t, http.StatusOK, okReply)
 	errExpired := errors.New("token expired")
 	c := newClient(t, client.Config{
 		BaseURL: srv.URL,
 		Token:   func(context.Context) (string, error) { return "", errExpired },
 	})
-	_, err := c.Respond(t.Context(), hello())
+	_, err := c.Generate(t.Context(), hello())
 	if !errors.Is(err, errExpired) {
-		t.Errorf("Respond error = %v, want it to wrap %v", err, errExpired)
+		t.Errorf("Generate error = %v, want it to wrap %v", err, errExpired)
 	}
 	if n := len(srv.Requests()); n != 0 {
 		t.Errorf("server received %d requests, want 0", n)
 	}
 }
 
-// TestRespondAPIError covers what the Client makes of a non-2xx reply: an *APIError with the
+// TestGenerateAPIError covers what the Client makes of a non-2xx reply: an *APIError with the
 // status and the whole body, its text built from the details the Format decoded or, without a
 // message, from the start of the body. What the Format decodes is completions' test.
-func TestRespondAPIError(t *testing.T) {
+func TestGenerateAPIError(t *testing.T) {
 	long := strings.Repeat("x", 600)
 	cases := []struct {
 		name   string
@@ -254,10 +254,10 @@ func TestRespondAPIError(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := clienttest.NewServer(t, tc.status, tc.reply)
 			c := newClient(t, client.Config{BaseURL: srv.URL})
-			resp, err := c.Respond(t.Context(), hello())
+			resp, err := c.Generate(t.Context(), hello())
 			apiErr, ok := errors.AsType[*client.APIError](err)
 			if !ok {
-				t.Fatalf("Respond = %v, %v; want an *APIError", resp, err)
+				t.Fatalf("Generate = %v, %v; want an *APIError", resp, err)
 			}
 			if apiErr.Status != tc.status {
 				t.Errorf("APIError.Status = %d, want %d", apiErr.Status, tc.status)
@@ -277,7 +277,7 @@ type roundTripper func(*http.Request) (*http.Response, error)
 
 func (f roundTripper) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-func TestRespondWrapsTransportError(t *testing.T) {
+func TestGenerateWrapsTransportError(t *testing.T) {
 	errDown := errors.New("network down")
 	c := newClient(t, client.Config{
 		BaseURL: "http://h/v1",
@@ -285,29 +285,29 @@ func TestRespondWrapsTransportError(t *testing.T) {
 			return nil, errDown
 		})},
 	})
-	_, err := c.Respond(t.Context(), hello())
+	_, err := c.Generate(t.Context(), hello())
 	if !errors.Is(err, errDown) {
-		t.Errorf("Respond error = %v, want it to wrap %v", err, errDown)
+		t.Errorf("Generate error = %v, want it to wrap %v", err, errDown)
 	}
 	if _, ok := errors.AsType[*client.APIError](err); ok {
-		t.Errorf("Respond error = %v, an *APIError; want a transport error", err)
+		t.Errorf("Generate error = %v, an *APIError; want a transport error", err)
 	}
 }
 
-func TestRespondWrapsCancelledContext(t *testing.T) {
+func TestGenerateWrapsCancelledContext(t *testing.T) {
 	srv := clienttest.NewServer(t, http.StatusOK, okReply)
 	c := newClient(t, client.Config{BaseURL: srv.URL})
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	_, err := c.Respond(ctx, hello())
+	_, err := c.Generate(ctx, hello())
 	if !errors.Is(err, context.Canceled) {
-		t.Errorf("Respond error = %v, want it to wrap context.Canceled", err)
+		t.Errorf("Generate error = %v, want it to wrap context.Canceled", err)
 	}
 }
 
-// TestRespondRefusesInvalidRequest covers when Respond validates: before the token source is
+// TestGenerateRefusesInvalidRequest covers when Generate validates: before the token source is
 // called or anything is sent. Which requests Validate refuses is protocol's test.
-func TestRespondRefusesInvalidRequest(t *testing.T) {
+func TestGenerateRefusesInvalidRequest(t *testing.T) {
 	noModel := hello()
 	noModel.Model = ""
 	cases := []struct {
@@ -326,12 +326,12 @@ func TestRespondRefusesInvalidRequest(t *testing.T) {
 				BaseURL: srv.URL,
 				Token:   func(context.Context) (string, error) { called = true; return "", nil },
 			})
-			resp, err := c.Respond(t.Context(), tc.req)
+			resp, err := c.Generate(t.Context(), tc.req)
 			if err == nil {
-				t.Fatalf("Respond = %v, nil; want an error containing %q", resp, tc.want)
+				t.Fatalf("Generate = %v, nil; want an error containing %q", resp, tc.want)
 			}
 			if !strings.Contains(err.Error(), tc.want) {
-				t.Errorf("Respond error = %q, want it to contain %q", err, tc.want)
+				t.Errorf("Generate error = %q, want it to contain %q", err, tc.want)
 			}
 			if called {
 				t.Error("the token source was called")

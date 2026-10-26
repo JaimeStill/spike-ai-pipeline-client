@@ -17,7 +17,7 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
   and a member that clashes with a typed field is refused. `format` holds the `Format` contract.
   The module root, `client`, is the transport: `client.New` builds a `Client` from a validated
   `Config` (base URL, query, token source, the caller's `http.Client`, and a required
-  `format.Format`), `Client.Respond` validates and sends a `protocol.Request`, and a non-2xx
+  `format.Format`), `Client.Generate` validates and sends a `protocol.Request`, and a non-2xx
   reply is an `*APIError`.
 - `format/completions`, the Chat Completions format (`/chat/completions`): instructions and
   message items encoded as messages, `max_output_tokens` sent as `max_completion_tokens`, and

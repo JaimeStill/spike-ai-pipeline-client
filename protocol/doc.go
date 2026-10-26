@@ -25,7 +25,7 @@
 //   - [Usage] counts a request's tokens.
 //   - [OutputTokensDetails] breaks the output tokens down.
 //   - [Status] is a response's or item's status, [StatusCompleted] or [StatusIncomplete].
-//   - [Item] is an input or output item, a closed set.
+//   - [Item] is one unit of a conversation, carried in Input and Output, a closed set.
 //   - [Message] is a message item: content parts from a role.
 //   - [Role] is a message's author: [RoleUser], [RoleSystem], [RoleDeveloper], or
 //     [RoleAssistant].

@@ -1,8 +1,11 @@
 package protocol
 
-// Item is one entry of a request's input or a response's output, as Open Responses defines
-// items. The set is closed: the item types are this package's, and an item is one of them by
-// value, such as Message, never a pointer to one.
+// Item is one unit of a conversation, as Open Responses defines it: a message, a function call
+// or its output, or reasoning. Items are carried in a request's Input and a response's
+// Output, and the same value moves from one response's Output into the next request's Input,
+// so a caller continues a conversation by appending what came back. The set is closed: the item
+// types are this package's, and an item is one of them by value, such as Message, never a
+// pointer to one.
 type Item interface {
 	item()
 }

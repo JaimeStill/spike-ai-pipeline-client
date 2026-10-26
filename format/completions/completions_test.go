@@ -17,9 +17,9 @@ import (
 // okReply is a reply that decodes to a completed response.
 const okReply = `{"choices":[{"message":{"role":"assistant","content":"Paris"},"finish_reason":"stop"}]}`
 
-// respond sends req through a Chat Completions client to a server answering reply, and returns
-// the server, which holds what arrived on the wire, and Respond's results.
-func respond(t *testing.T, reply string, req *protocol.Request) (*clienttest.Server, *protocol.Response, error) {
+// generate sends req through a Chat Completions client to a server answering reply, and returns
+// the server, which holds what arrived on the wire, and Generate's results.
+func generate(t *testing.T, reply string, req *protocol.Request) (*clienttest.Server, *protocol.Response, error) {
 	t.Helper()
 	srv := clienttest.NewServer(t, http.StatusOK, reply)
 	c, err := client.New(client.Config{
@@ -30,7 +30,7 @@ func respond(t *testing.T, reply string, req *protocol.Request) (*clienttest.Ser
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	resp, err := c.Respond(t.Context(), req)
+	resp, err := c.Generate(t.Context(), req)
 	return srv, resp, err
 }
 
@@ -146,9 +146,9 @@ func TestEncode(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			srv, _, err := respond(t, okReply, tc.req)
+			srv, _, err := generate(t, okReply, tc.req)
 			if err != nil {
-				t.Fatalf("Respond: %v", err)
+				t.Fatalf("Generate: %v", err)
 			}
 			got := srv.Only(t)
 			if got.Path != "/v1/chat/completions" {
@@ -172,18 +172,18 @@ func TestEncodeRefusesNativeClash(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			srv, resp, err := respond(t, okReply, &protocol.Request{
+			srv, resp, err := generate(t, okReply, &protocol.Request{
 				Model:           "m",
 				Input:           []protocol.Item{text(protocol.RoleUser, "hi")},
 				MaxOutputTokens: tc.max,
 				Native:          jsontext.Value(tc.native),
 			})
 			if err == nil {
-				t.Fatalf("Respond = %v, nil; want a clash error", resp)
+				t.Fatalf("Generate = %v, nil; want a clash error", resp)
 			}
 			want := "native member " + tc.member + " clashes"
 			if !strings.Contains(err.Error(), want) {
-				t.Errorf("Respond error = %q, want it to contain %q", err, want)
+				t.Errorf("Generate error = %q, want it to contain %q", err, want)
 			}
 			if n := len(srv.Requests()); n != 0 {
 				t.Errorf("server received %d requests, want 0", n)
@@ -206,9 +206,9 @@ func TestDecodeFinishReason(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.reason, func(t *testing.T) {
 			reply := `{"choices":[{"message":{"role":"assistant","content":"Paris"},"finish_reason":"` + tc.reason + `"}]}`
-			_, resp, err := respond(t, reply, &protocol.Request{Model: "m", Input: []protocol.Item{text(protocol.RoleUser, "hi")}})
+			_, resp, err := generate(t, reply, &protocol.Request{Model: "m", Input: []protocol.Item{text(protocol.RoleUser, "hi")}})
 			if err != nil {
-				t.Fatalf("Respond: %v", err)
+				t.Fatalf("Generate: %v", err)
 			}
 			if resp.Status != tc.status {
 				t.Errorf("Status = %q, want %q", resp.Status, tc.status)
@@ -307,12 +307,12 @@ func TestDecode(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, resp, err := respond(t, tc.reply, req)
+			_, resp, err := generate(t, tc.reply, req)
 			if err != nil {
-				t.Fatalf("Respond: %v", err)
+				t.Fatalf("Generate: %v", err)
 			}
 			if !reflect.DeepEqual(resp, tc.want) {
-				t.Errorf("Respond = %#v\nwant      %#v", resp, tc.want)
+				t.Errorf("Generate = %#v\nwant      %#v", resp, tc.want)
 			}
 		})
 	}
@@ -331,12 +331,12 @@ func TestDecodeRefusesReply(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, resp, err := respond(t, tc.reply, &protocol.Request{Model: "m", Input: []protocol.Item{text(protocol.RoleUser, "hi")}})
+			_, resp, err := generate(t, tc.reply, &protocol.Request{Model: "m", Input: []protocol.Item{text(protocol.RoleUser, "hi")}})
 			if err == nil {
-				t.Fatalf("Respond = %v, nil; want an error containing %q", resp, tc.want)
+				t.Fatalf("Generate = %v, nil; want an error containing %q", resp, tc.want)
 			}
 			if !strings.Contains(err.Error(), tc.want) {
-				t.Errorf("Respond error = %q, want it to contain %q", err, tc.want)
+				t.Errorf("Generate error = %q, want it to contain %q", err, tc.want)
 			}
 		})
 	}
@@ -368,10 +368,10 @@ func TestDecodeError(t *testing.T) {
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}
-			_, err = c.Respond(t.Context(), &protocol.Request{Model: "m", Input: []protocol.Item{text(protocol.RoleUser, "hi")}})
+			_, err = c.Generate(t.Context(), &protocol.Request{Model: "m", Input: []protocol.Item{text(protocol.RoleUser, "hi")}})
 			apiErr, ok := errors.AsType[*client.APIError](err)
 			if !ok {
-				t.Fatalf("Respond error = %v, want an *APIError", err)
+				t.Fatalf("Generate error = %v, want an *APIError", err)
 			}
 			if apiErr.Message != tc.message || apiErr.Type != tc.typ || apiErr.Code != tc.code {
 				t.Errorf("APIError = {%q %q %q}, want {%q %q %q}",

@@ -19,13 +19,13 @@ func userText(s string) protocol.Message {
 
 func TestChat(t *testing.T) {
 	c := chatCompletions(t)
-	resp, err := c.Respond(requestContext(t), &protocol.Request{
+	resp, err := c.Generate(requestContext(t), &protocol.Request{
 		Model:        chatModel,
 		Instructions: "Answer in one word.",
 		Input:        []protocol.Item{userText("What is the capital of France?")},
 	})
 	if err != nil {
-		t.Fatalf("Respond: %v", err)
+		t.Fatalf("Generate: %v", err)
 	}
 	if resp.Status != protocol.StatusCompleted {
 		t.Fatalf("Status = %q (%+v), want completed", resp.Status, resp.IncompleteDetails)
@@ -55,13 +55,13 @@ func TestChat(t *testing.T) {
 func TestChatIncompleteAtMaxOutputTokens(t *testing.T) {
 	c := chatCompletions(t)
 	const bound = 16
-	resp, err := c.Respond(requestContext(t), &protocol.Request{
+	resp, err := c.Generate(requestContext(t), &protocol.Request{
 		Model:           chatModel,
 		Input:           []protocol.Item{userText("Write a long essay on the history of Paris.")},
 		MaxOutputTokens: bound,
 	})
 	if err != nil {
-		t.Fatalf("Respond: %v", err)
+		t.Fatalf("Generate: %v", err)
 	}
 	want := protocol.IncompleteDetails{Reason: protocol.ReasonMaxOutputTokens}
 	if resp.Status != protocol.StatusIncomplete || resp.IncompleteDetails == nil || *resp.IncompleteDetails != want {
@@ -74,13 +74,13 @@ func TestChatIncompleteAtMaxOutputTokens(t *testing.T) {
 
 func TestChatUnknownModelIsAPIError(t *testing.T) {
 	c := chatCompletions(t)
-	_, err := c.Respond(requestContext(t), &protocol.Request{
+	_, err := c.Generate(requestContext(t), &protocol.Request{
 		Model: "spike-ai-pipeline/no-such-model",
 		Input: []protocol.Item{userText("Hello.")},
 	})
 	var apiErr *client.APIError
 	if !errors.As(err, &apiErr) {
-		t.Fatalf("Respond error = %v, want an *APIError", err)
+		t.Fatalf("Generate error = %v, want an *APIError", err)
 	}
 	if apiErr.Status != http.StatusBadRequest || apiErr.Message == "" {
 		t.Errorf("APIError = %d %q, want 400 with the router's message", apiErr.Status, apiErr.Message)

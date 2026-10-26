@@ -17,6 +17,6 @@
 //   - [TokenSource] returns the bearer token for one request.
 //   - [New] validates a Config and returns a Client.
 //   - [Client] makes requests of one endpoint in one format.
-//   - [Client.Respond] sends a Request and returns its Response.
+//   - [Client.Generate] sends a Request and returns its Response.
 //   - [APIError] is a non-2xx reply, matched with errors.As.
 package client

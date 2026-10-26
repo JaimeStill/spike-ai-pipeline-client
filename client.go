@@ -32,7 +32,7 @@ type Config struct {
 	// HTTP sends the requests. It is required, and its transport and timeouts are the Client's:
 	// the library sets no timeout, retry, or limit of its own.
 	HTTP *http.Client
-	// Format is the wire format Respond speaks, chosen by its constructor, such as
+	// Format is the wire format Generate speaks, chosen by its constructor, such as
 	// completions.New(). It is required.
 	Format format.Format
 }
@@ -85,26 +85,26 @@ func New(cfg Config) (*Client, error) {
 	}, nil
 }
 
-// Respond sends req in the Client's format and returns the model's response. It validates req
+// Generate sends req in the Client's format and returns the model's response. It validates req
 // with its Validate method, and the format encodes it, before the token source is called or
 // anything is sent. A non-2xx reply is an *APIError; a transport failure or a cancelled ctx is
 // returned wrapped.
-func (c *Client) Respond(ctx context.Context, req *protocol.Request) (*protocol.Response, error) {
+func (c *Client) Generate(ctx context.Context, req *protocol.Request) (*protocol.Response, error) {
 	if err := req.Validate(); err != nil {
-		return nil, fmt.Errorf("client: respond: %w", err)
+		return nil, fmt.Errorf("client: generate: %w", err)
 	}
 	header := make(http.Header)
 	body, err := c.format.EncodeRequest(req, header)
 	if err != nil {
-		return nil, fmt.Errorf("client: respond: %w", err)
+		return nil, fmt.Errorf("client: generate: %w", err)
 	}
 	reply, err := c.post(ctx, c.format.Route(), header, body)
 	if err != nil {
-		return nil, fmt.Errorf("client: respond: %w", err)
+		return nil, fmt.Errorf("client: generate: %w", err)
 	}
 	resp, err := c.format.DecodeResponse(reply)
 	if err != nil {
-		return nil, fmt.Errorf("client: respond: %w", err)
+		return nil, fmt.Errorf("client: generate: %w", err)
 	}
 	return resp, nil
 }
