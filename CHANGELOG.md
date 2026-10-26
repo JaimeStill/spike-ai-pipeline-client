@@ -42,5 +42,15 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
   assistant message with `tool_calls`, sends a call's output as a `tool` message, and decodes a
   reply's `tool_calls` into function_call items after its message. An `allowed_tools` choice of
   mode none has no Chat Completions form and is refused.
+- Reasoning: the item `protocol.Reasoning` (id, `ReasoningText` content, `SummaryText` summary,
+  and `EncryptedContent`, opaque and owned by the format that wrote it), and
+  `Request.Reasoning`, a `ReasoningParam` whose `ReasoningEffort` is the spec's none, low,
+  medium, high, or xhigh. A response's output goes back as input as it came: content on an input
+  reasoning item is accepted and never sent, as the spec's input reasoning item has none. Chat
+  Completions decodes a reply's `reasoning_content` into a reasoning item ahead of the message
+  and calls, with the text as content and in a versioned envelope of its own in
+  `encrypted_content`; it sends that text back as the `reasoning_content` of the assistant
+  message the reasoning led to, and drops a reasoning item whose `encrypted_content` isn't its
+  envelope. The effort goes out as `reasoning_effort`.
 
 [Unreleased]: https://github.com/JaimeStill/spike-ai-pipeline-client/commits/main

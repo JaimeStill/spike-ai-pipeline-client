@@ -1,6 +1,7 @@
 package completions
 
 import (
+	"encoding/base64"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -9,8 +10,10 @@ import (
 	"github.com/JaimeStill/spike-ai-pipeline-client/protocol"
 )
 
-// DecodeResponse decodes a Chat Completions response body. The first choice's message becomes
-// an assistant message item, its content an output_text part and its refusal a refusal part;
+// DecodeResponse decodes a Chat Completions response body. The first choice's message's
+// reasoning_content, when it has one, becomes a reasoning item ahead of the others: its content
+// one reasoning_text part of the text, and its encrypted_content the format's envelope holding
+// it, which EncodeRequest reads back. The message then becomes an assistant message item, its content an output_text part and its refusal a refusal part;
 // a message with neither gives no message item. Each of its tool_calls then becomes a
 // function_call item, in order, its call_id the call's id; a call of a type other than function
 // is an error. The first choice's finish_reason gives the response's status, which the items
@@ -54,6 +57,16 @@ func (*Format) DecodeResponse(body []byte) (*protocol.Response, error) {
 	default:
 		return nil, fmt.Errorf("completions: response has unknown finish_reason %q", choice.FinishReason)
 	}
+	if r := choice.Message.ReasoningContent; r != "" {
+		sealed, err := sealEnvelope(envelope{ReasoningContent: r})
+		if err != nil {
+			return nil, fmt.Errorf("completions: reasoning: %w", err)
+		}
+		resp.Output = append(resp.Output, protocol.Reasoning{
+			Content:          []protocol.ReasoningText{{Text: r}},
+			EncryptedContent: sealed,
+		})
+	}
 	var content []protocol.ContentPart
 	if choice.Message.Content != "" {
 		content = append(content, protocol.OutputText{Text: choice.Message.Content})
@@ -80,6 +93,16 @@ func (*Format) DecodeResponse(body []byte) (*protocol.Response, error) {
 		})
 	}
 	return resp, nil
+}
+
+// sealEnvelope returns e in its encrypted_content layout: envelopePrefix, then e as JSON in
+// base64.
+func sealEnvelope(e envelope) (string, error) {
+	b, err := json.Marshal(e)
+	if err != nil {
+		return "", err
+	}
+	return envelopePrefix + base64.StdEncoding.EncodeToString(b), nil
 }
 
 // DecodeError decodes an OpenAI-style error body, {"error": {"message", "type", "code"}}, where

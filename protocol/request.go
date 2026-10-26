@@ -19,6 +19,8 @@ type Request struct {
 	Tools []FunctionTool
 	// ToolChoice controls which of Tools the model calls. Nil leaves it to the endpoint.
 	ToolChoice ToolChoice
+	// Reasoning configures the model's reasoning. Its zero value leaves it to the endpoint.
+	Reasoning ReasoningParam
 	// MaxOutputTokens bounds the tokens the model generates, reasoning included. Zero leaves
 	// the bound to the endpoint.
 	MaxOutputTokens int
@@ -30,12 +32,38 @@ type Request struct {
 	Native jsontext.Value
 }
 
+// ReasoningParam configures a reasoning model's reasoning: the spec's reasoning parameter. The
+// spec's summary member, which asks for a reasoning summary, is left out: Chat Completions has
+// no form for it. It joins with the Open Responses format, whose API has one.
+type ReasoningParam struct {
+	// Effort is how much the model reasons. Empty leaves it to the endpoint.
+	Effort ReasoningEffort
+}
+
+// ReasoningEffort is how much a model reasons before it answers. More effort may take longer
+// and use more output tokens.
+type ReasoningEffort string
+
+// The efforts a ReasoningParam takes.
+const (
+	// ReasoningEffortNone asks the model not to reason.
+	ReasoningEffortNone ReasoningEffort = "none"
+	// ReasoningEffortLow asks for little reasoning.
+	ReasoningEffortLow ReasoningEffort = "low"
+	// ReasoningEffortMedium asks for a moderate amount of reasoning.
+	ReasoningEffortMedium ReasoningEffort = "medium"
+	// ReasoningEffortHigh asks for thorough reasoning.
+	ReasoningEffortHigh ReasoningEffort = "high"
+	// ReasoningEffortXHigh asks for the most reasoning the model gives.
+	ReasoningEffortXHigh ReasoningEffort = "xhigh"
+)
+
 // Validate reports whether the request is one the model can describe, so a caller can check a
 // request before sending it; a client validates every request before anything is sent. It
 // refuses nil, no model, no input, an item or content part that isn't one of this package's by
 // value (a *Message is refused), a message with an unknown role or no content, a part its role
 // doesn't take, an image with no URL or an unknown detail, an audio clip with no data or an
-// unknown format, a function_call with no call id or name or with arguments that aren't JSON, a
+// unknown format, a reasoning effort the spec doesn't define, a function_call with no call id or name or with arguments that aren't JSON, a
 // function_call_output with no call id, both output forms, or a part other than InputText, a
 // tool with no name, a name the spec doesn't allow, or a name another tool has, parameters that
 // aren't a JSON object, a tool choice that isn't one of this package's by value, an unknown
@@ -60,6 +88,11 @@ func (r *Request) validate() error {
 		return errors.New("request has no input")
 	case r.MaxOutputTokens < 0:
 		return fmt.Errorf("request's max output tokens %d is negative", r.MaxOutputTokens)
+	}
+	switch r.Reasoning.Effort {
+	case "", ReasoningEffortNone, ReasoningEffortLow, ReasoningEffortMedium, ReasoningEffortHigh, ReasoningEffortXHigh:
+	default:
+		return fmt.Errorf("request has unknown reasoning effort %q", r.Reasoning.Effort)
 	}
 	for i, it := range r.Input {
 		if err := validateItem(it); err != nil {
@@ -94,6 +127,10 @@ func validateItem(it Item) error {
 		return validateFunctionCall(it)
 	case FunctionCallOutput:
 		return validateFunctionCallOutput(it)
+	case Reasoning:
+		// Every field is optional, and Content, which the spec's input item lacks, is ignored
+		// on input rather than refused, so a response's Output goes back as it came.
+		return nil
 	default:
 		return fmt.Errorf("unsupported item %T", it)
 	}

@@ -91,6 +91,25 @@ func TestValidateAccepts(t *testing.T) {
 		{"tool name of 64 characters", with(func(r *protocol.Request) {
 			r.Tools = []protocol.FunctionTool{{Name: strings.Repeat("a", 64)}}
 		})},
+		// Content, which the spec's input reasoning item lacks, is accepted on input and never
+		// sent, so a response's Output goes back as it came.
+		{"reasoning items, content on input included", with(func(r *protocol.Request) {
+			r.Input = append(r.Input,
+				protocol.Reasoning{
+					ID:               "rs_1",
+					Content:          []protocol.ReasoningText{{Text: "The user asks."}},
+					Summary:          []protocol.SummaryText{{Text: "Asked."}},
+					EncryptedContent: "opaque",
+				},
+				protocol.Reasoning{},
+				protocol.Message{Role: protocol.RoleAssistant, Content: []protocol.ContentPart{protocol.OutputText{Text: "Paris"}}},
+			)
+		})},
+		{"reasoning effort none", with(func(r *protocol.Request) { r.Reasoning.Effort = protocol.ReasoningEffortNone })},
+		{"reasoning effort low", with(func(r *protocol.Request) { r.Reasoning.Effort = protocol.ReasoningEffortLow })},
+		{"reasoning effort medium", with(func(r *protocol.Request) { r.Reasoning.Effort = protocol.ReasoningEffortMedium })},
+		{"reasoning effort high", with(func(r *protocol.Request) { r.Reasoning.Effort = protocol.ReasoningEffortHigh })},
+		{"reasoning effort xhigh", with(func(r *protocol.Request) { r.Reasoning.Effort = protocol.ReasoningEffortXHigh })},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -186,6 +205,11 @@ func TestValidateRefuses(t *testing.T) {
 		{"function call with arguments that aren't JSON", with(func(r *protocol.Request) {
 			r.Input = []protocol.Item{protocol.FunctionCall{CallID: "c1", Name: "f", Arguments: `{"city":`}}
 		}), "function_call c1 has arguments that aren't JSON"},
+		{"pointer reasoning", with(func(r *protocol.Request) {
+			r.Input = []protocol.Item{&protocol.Reasoning{EncryptedContent: "opaque"}}
+		}), "unsupported item *protocol.Reasoning"},
+		{"unknown reasoning effort", with(func(r *protocol.Request) { r.Reasoning.Effort = "minimal" }),
+			`unknown reasoning effort "minimal"`},
 		{"pointer function call", with(func(r *protocol.Request) {
 			r.Input = []protocol.Item{&protocol.FunctionCall{CallID: "c1", Name: "f"}}
 		}), "unsupported item *protocol.FunctionCall"},

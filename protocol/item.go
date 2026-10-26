@@ -174,6 +174,48 @@ type FunctionCallOutput struct {
 
 func (FunctionCallOutput) item() {}
 
+// Reasoning is a reasoning item: the model's reasoning ahead of its answer or its calls. It
+// comes back in a response's Output ahead of the items it led to, and goes back in the next
+// request's Input as it came, so a format that must resend the reasoning can.
+//
+// Content is what a caller reads; EncryptedContent is what a format resends. The spec's input
+// reasoning item has no content, so a format never sends Content on input: it ignores it there
+// and reads EncryptedContent instead. EncryptedContent is opaque and owned by the format that
+// wrote it, which writes there what it needs to resend the reasoning, in a form of its own; a
+// caller carries it back unchanged. A format reading another format's EncryptedContent drops
+// the item rather than send it.
+//
+// The spec gives the reasoning item no status, so Reasoning has none.
+type Reasoning struct {
+	// ID is the item's id, when the format supplies one. Chat Completions doesn't.
+	ID string
+	// Content is the reasoning the model produced, as reasoning_text parts, when the format
+	// supplies it. It is output only: on input it is ignored and never sent.
+	Content []ReasoningText
+	// Summary is a summary of the reasoning, as summary_text parts, when the format supplies
+	// one. Chat Completions doesn't.
+	Summary []SummaryText
+	// EncryptedContent is the reasoning in the form of the format that wrote it, opaque to the
+	// caller, which carries it back unchanged.
+	EncryptedContent string
+}
+
+func (Reasoning) item() {}
+
+// ReasoningText is reasoning the model produced: reasoning_text, a part of a Reasoning item's
+// Content. It is held there alone, so it isn't a ContentPart.
+type ReasoningText struct {
+	// Text is the reasoning.
+	Text string
+}
+
+// SummaryText is a summary of the model's reasoning: summary_text, a part of a Reasoning
+// item's Summary. It is held there alone, so it isn't a ContentPart.
+type SummaryText struct {
+	// Text is the summary.
+	Text string
+}
+
 // Status is the status of a response or of an item in its output.
 type Status string
 

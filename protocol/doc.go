@@ -24,7 +24,11 @@
 // Its exported identifiers:
 //
 //   - [Request] is a request for a response: model, instructions, input, tools, tool choice,
-//     and the native tier.
+//     reasoning, and the native tier.
+//   - [ReasoningParam] configures the model's reasoning: its effort.
+//   - [ReasoningEffort] is how much the model reasons: [ReasoningEffortNone],
+//     [ReasoningEffortLow], [ReasoningEffortMedium], [ReasoningEffortHigh], or
+//     [ReasoningEffortXHigh].
 //   - [Request.Validate] refuses a request the model can't describe.
 //   - [Response] is a model's response: output, status, and usage.
 //   - [IncompleteDetails] says why a response is incomplete.
@@ -49,6 +53,10 @@
 //   - [FunctionCall] is a function_call item: the model's call of a function tool.
 //   - [FunctionCallOutput] is a function_call_output item: a call's result, as a string or
 //     parts.
+//   - [Reasoning] is a reasoning item: the model's reasoning, as content, summary, and the
+//     encrypted content its format owns.
+//   - [ReasoningText] is reasoning the model produced, reasoning_text.
+//   - [SummaryText] is a summary of the reasoning, summary_text.
 //   - [FunctionTool] is a function the model may call, the spec's one tool kind.
 //   - [ToolChoice] controls which tool the model calls, a closed set.
 //   - [ToolChoiceMode] is a choice of mode, and an allowed set's: [ToolChoiceAuto],

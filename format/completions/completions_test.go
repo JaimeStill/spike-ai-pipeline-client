@@ -2,6 +2,7 @@ package completions_test
 
 import (
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"net/http"
 	"reflect"
@@ -80,6 +81,26 @@ const toolsWire = `"tools":[
 
 func assistant(s string) protocol.Message {
 	return protocol.Message{Role: protocol.RoleAssistant, Content: []protocol.ContentPart{protocol.OutputText{Text: s}}}
+}
+
+// The format's envelopes, as it writes them into encrypted_content, of the reasoning_content
+// their names give. They are literal so a change to the envelope's layout, which would orphan
+// the envelopes callers hold, fails here.
+const (
+	envelopeUserAsks    = "spike-ai-pipeline:completions/v1:eyJyZWFzb25pbmdfY29udGVudCI6IlRoZSB1c2VyIGFza3MuIn0="
+	envelopeWeatherTool = "spike-ai-pipeline:completions/v1:eyJyZWFzb25pbmdfY29udGVudCI6Ik5lZWQgdGhlIHdlYXRoZXIgdG9vbC4ifQ=="
+	envelopeThenAnswer  = "spike-ai-pipeline:completions/v1:eyJyZWFzb25pbmdfY29udGVudCI6IlRoZW4gYW5zd2VyLiJ9"
+	envelopeEmpty       = "spike-ai-pipeline:completions/v1:eyJyZWFzb25pbmdfY29udGVudCI6IiJ9"
+)
+
+// reasoning is a reasoning item of the envelope encrypted, with content its format ignores on
+// input.
+func reasoning(encrypted string) protocol.Reasoning {
+	return protocol.Reasoning{
+		Content:          []protocol.ReasoningText{{Text: "content is never sent"}},
+		Summary:          []protocol.SummaryText{{Text: "nor is a summary"}},
+		EncryptedContent: encrypted,
+	}
 }
 
 func TestEncode(t *testing.T) {
@@ -338,6 +359,113 @@ func TestEncode(t *testing.T) {
 			want: `{"model":"m","messages":[{"role":"user","content":"hi"}],"max_completion_tokens":64}`,
 		},
 		{
+			name: "reasoning effort as reasoning_effort",
+			req: &protocol.Request{
+				Model:     "m",
+				Input:     []protocol.Item{text(protocol.RoleUser, "hi")},
+				Reasoning: protocol.ReasoningParam{Effort: protocol.ReasoningEffortXHigh},
+			},
+			want: `{"model":"m","messages":[{"role":"user","content":"hi"}],"reasoning_effort":"xhigh"}`,
+		},
+		{
+			name: "reasoning joins the assistant message and calls after it",
+			req: &protocol.Request{Model: "m", Input: []protocol.Item{
+				text(protocol.RoleUser, "Weather in Paris?"),
+				reasoning(envelopeWeatherTool),
+				assistant("Checking."),
+				protocol.FunctionCall{CallID: "c1", Name: "get_weather", Arguments: `{"city":"Paris"}`},
+				protocol.FunctionCallOutput{CallID: "c1", Output: "21"},
+				reasoning(envelopeThenAnswer),
+				assistant("It is 21."),
+			}},
+			want: `{"model":"m","messages":[
+				{"role":"user","content":"Weather in Paris?"},
+				{"role":"assistant","content":"Checking.","reasoning_content":"Need the weather tool.","tool_calls":[
+					{"id":"c1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}}]},
+				{"role":"tool","content":"21","tool_call_id":"c1"},
+				{"role":"assistant","content":"It is 21.","reasoning_content":"Then answer."}]}`,
+		},
+		{
+			name: "reasoning opens a run of calls alone",
+			req: &protocol.Request{Model: "m", Input: []protocol.Item{
+				text(protocol.RoleUser, "Weather in Paris?"),
+				reasoning(envelopeWeatherTool),
+				protocol.FunctionCall{CallID: "c1", Name: "get_weather", Arguments: `{"city":"Paris"}`},
+			}},
+			want: `{"model":"m","messages":[
+				{"role":"user","content":"Weather in Paris?"},
+				{"role":"assistant","reasoning_content":"Need the weather tool.","tool_calls":[
+					{"id":"c1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}}]}]}`,
+		},
+		{
+			name: "consecutive reasoning concatenated in order",
+			req: &protocol.Request{Model: "m", Input: []protocol.Item{
+				text(protocol.RoleUser, "hi"),
+				reasoning(envelopeUserAsks),
+				reasoning(envelopeThenAnswer),
+				assistant("Hello."),
+			}},
+			want: `{"model":"m","messages":[
+				{"role":"user","content":"hi"},
+				{"role":"assistant","content":"Hello.","reasoning_content":"The user asks.Then answer."}]}`,
+		},
+		{
+			name: "reasoning opens a new run",
+			req: &protocol.Request{Model: "m", Input: []protocol.Item{
+				text(protocol.RoleUser, "hi"),
+				assistant("Hello."),
+				reasoning(envelopeWeatherTool),
+				protocol.FunctionCall{CallID: "c1", Name: "get_weather", Arguments: `{}`},
+			}},
+			want: `{"model":"m","messages":[
+				{"role":"user","content":"hi"},
+				{"role":"assistant","content":"Hello."},
+				{"role":"assistant","reasoning_content":"Need the weather tool.","tool_calls":[
+					{"id":"c1","type":"function","function":{"name":"get_weather","arguments":"{}"}}]}]}`,
+		},
+		{
+			name: "reasoning not this format's dropped",
+			req: &protocol.Request{Model: "m", Input: []protocol.Item{
+				text(protocol.RoleUser, "hi"),
+				reasoning(""),
+				reasoning("gAAAAABo-opaque-provider-blob"),
+				reasoning("spike-ai-pipeline:messages/v1:eyJ0aGlua2luZyI6IngifQ=="),
+				reasoning("spike-ai-pipeline:completions/v2:" + strings.TrimPrefix(envelopeUserAsks, "spike-ai-pipeline:completions/v1:")),
+				reasoning("spike-ai-pipeline:completions/v1:not base64!"),
+				reasoning("spike-ai-pipeline:completions/v1:bm90IEpTT04="),
+				reasoning(envelopeEmpty),
+				assistant("Hello."),
+			}},
+			want: `{"model":"m","messages":[
+				{"role":"user","content":"hi"},
+				{"role":"assistant","content":"Hello."}]}`,
+		},
+		{
+			name: "dropped reasoning leaves the run open",
+			req: &protocol.Request{Model: "m", Input: []protocol.Item{
+				text(protocol.RoleUser, "hi"),
+				assistant("Checking."),
+				reasoning("gAAAAABo-opaque-provider-blob"),
+				protocol.FunctionCall{CallID: "c1", Name: "get_weather", Arguments: `{}`},
+			}},
+			want: `{"model":"m","messages":[
+				{"role":"user","content":"hi"},
+				{"role":"assistant","content":"Checking.","tool_calls":[
+					{"id":"c1","type":"function","function":{"name":"get_weather","arguments":"{}"}}]}]}`,
+		},
+		{
+			name: "reasoning nothing follows dropped",
+			req: &protocol.Request{Model: "m", Input: []protocol.Item{
+				text(protocol.RoleUser, "hi"),
+				reasoning(envelopeUserAsks),
+				text(protocol.RoleUser, "Still there?"),
+				reasoning(envelopeThenAnswer),
+			}},
+			want: `{"model":"m","messages":[
+				{"role":"user","content":"hi"},
+				{"role":"user","content":"Still there?"}]}`,
+		},
+		{
 			name: "native members at the top level",
 			req: &protocol.Request{
 				Model:  "m",
@@ -369,6 +497,56 @@ func TestEncode(t *testing.T) {
 			}
 			assertJSON(t, got.Body, tc.want)
 		})
+	}
+}
+
+// TestReasoningRoundTrip sends a reply's output back as input, and wants the reasoning_content
+// it came with sent back exactly, on the assistant message it led to.
+func TestReasoningRoundTrip(t *testing.T) {
+	const reasoningContent = "The user wants Paris's weather.\n\nCall get_weather with {\"city\":\"Paris\"} — \u00e9t\u00e9 \U0001F600."
+	reply, err := json.Marshal(map[string]any{
+		"choices": []any{map[string]any{
+			"finish_reason": "tool_calls",
+			"message": map[string]any{
+				"role":              "assistant",
+				"reasoning_content": reasoningContent,
+				"tool_calls": []any{map[string]any{"id": "c1", "type": "function",
+					"function": map[string]any{"name": "get_weather", "arguments": `{"city":"Paris"}`}}},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := &protocol.Request{Model: "m", Input: []protocol.Item{text(protocol.RoleUser, "Weather in Paris?")}}
+	_, resp, err := generate(t, string(reply), req)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	r, ok := resp.Output[0].(protocol.Reasoning)
+	if !ok || len(r.Content) != 1 || r.Content[0].Text != reasoningContent {
+		t.Fatalf("Output[0] = %#v, want reasoning of the reply's reasoning_content", resp.Output[0])
+	}
+	req.Input = append(req.Input, resp.Output...)
+	req.Input = append(req.Input, protocol.FunctionCallOutput{CallID: "c1", Output: "21"})
+	srv, _, err := generate(t, okReply, req)
+	if err != nil {
+		t.Fatalf("Generate with the output: %v", err)
+	}
+	var body struct {
+		Messages []struct {
+			Role             string `json:"role"`
+			ReasoningContent string `json:"reasoning_content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(srv.Only(t).Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Messages) != 3 || body.Messages[1].Role != "assistant" {
+		t.Fatalf("messages = %+v, want user, assistant, and tool", body.Messages)
+	}
+	if got := body.Messages[1].ReasoningContent; got != reasoningContent {
+		t.Errorf("reasoning_content = %q, want %q", got, reasoningContent)
 	}
 }
 
@@ -473,13 +651,53 @@ func TestDecode(t *testing.T) {
 					"prompt_tokens_details":{"cached_tokens":56}},
 				"id":"chatcmpl-1","timings":{"prompt_n":27}}`,
 			want: &protocol.Response{
-				Output: []protocol.Item{protocol.Message{
-					Status:  protocol.StatusCompleted,
-					Role:    protocol.RoleAssistant,
-					Content: []protocol.ContentPart{protocol.OutputText{Text: "Paris"}},
-				}},
+				Output: []protocol.Item{
+					protocol.Reasoning{
+						Content:          []protocol.ReasoningText{{Text: "The user asks."}},
+						EncryptedContent: envelopeUserAsks,
+					},
+					protocol.Message{
+						Status:  protocol.StatusCompleted,
+						Role:    protocol.RoleAssistant,
+						Content: []protocol.ContentPart{protocol.OutputText{Text: "Paris"}},
+					},
+				},
 				Status: protocol.StatusCompleted,
 				Usage:  protocol.Usage{InputTokens: 83, OutputTokens: 20, TotalTokens: 103},
+			},
+		},
+		{
+			name: "reasoning first, then the message and the calls",
+			reply: `{"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant",
+				"content":"Checking.","reasoning_content":"Need the weather tool.",
+				"tool_calls":[{"id":"c1","type":"function","function":{"name":"get_weather","arguments":"{}"}}]}}]}`,
+			want: &protocol.Response{
+				Output: []protocol.Item{
+					protocol.Reasoning{
+						Content:          []protocol.ReasoningText{{Text: "Need the weather tool."}},
+						EncryptedContent: envelopeWeatherTool,
+					},
+					protocol.Message{
+						Status:  protocol.StatusCompleted,
+						Role:    protocol.RoleAssistant,
+						Content: []protocol.ContentPart{protocol.OutputText{Text: "Checking."}},
+					},
+					protocol.FunctionCall{Status: protocol.StatusCompleted, CallID: "c1", Name: "get_weather", Arguments: "{}"},
+				},
+				Status: protocol.StatusCompleted,
+			},
+		},
+		{
+			name: "reasoning alone, cut off at the bound",
+			reply: `{"choices":[{"finish_reason":"length","message":{"role":"assistant",
+				"content":"","reasoning_content":"The user asks."}}]}`,
+			want: &protocol.Response{
+				Output: []protocol.Item{protocol.Reasoning{
+					Content:          []protocol.ReasoningText{{Text: "The user asks."}},
+					EncryptedContent: envelopeUserAsks,
+				}},
+				Status:            protocol.StatusIncomplete,
+				IncompleteDetails: &protocol.IncompleteDetails{Reason: protocol.ReasonMaxOutputTokens},
 			},
 		},
 		{
@@ -514,7 +732,7 @@ func TestDecode(t *testing.T) {
 		},
 		{
 			name:  "no content gives no message",
-			reply: `{"choices":[{"message":{"content":"","reasoning_content":"The user"},"finish_reason":"length"}]}`,
+			reply: `{"choices":[{"message":{"content":""},"finish_reason":"length"}]}`,
 			want: &protocol.Response{
 				Status:            protocol.StatusIncomplete,
 				IncompleteDetails: &protocol.IncompleteDetails{Reason: protocol.ReasonMaxOutputTokens},
@@ -523,11 +741,15 @@ func TestDecode(t *testing.T) {
 		{
 			name: "llama.cpp reply of tool calls, content null",
 			reply: `{"choices":[{"finish_reason":"tool_calls","index":0,"message":{"role":"assistant",
-				"content":null,"reasoning_content":"Need the weather.","tool_calls":[
+				"content":null,"reasoning_content":"Need the weather tool.","tool_calls":[
 					{"type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"},"id":"c1"},
 					{"type":"function","function":{"name":"get_time","arguments":"{}"},"id":"c2"}]}}]}`,
 			want: &protocol.Response{
 				Output: []protocol.Item{
+					protocol.Reasoning{
+						Content:          []protocol.ReasoningText{{Text: "Need the weather tool."}},
+						EncryptedContent: envelopeWeatherTool,
+					},
 					protocol.FunctionCall{Status: protocol.StatusCompleted, CallID: "c1", Name: "get_weather", Arguments: `{"city":"Paris"}`},
 					protocol.FunctionCall{Status: protocol.StatusCompleted, CallID: "c2", Name: "get_time", Arguments: "{}"},
 				},

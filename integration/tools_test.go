@@ -72,8 +72,7 @@ func TestFunctionCallRequired(t *testing.T) {
 }
 
 // TestFunctionCallRoundTrip sends a call's output back after the response's own output items,
-// and wants an answer that uses it. The reasoning that precedes the call isn't sent back: the
-// format doesn't carry reasoning yet.
+// and wants an answer that uses it.
 func TestFunctionCallRoundTrip(t *testing.T) {
 	c := chatCompletions(t)
 	req := &protocol.Request{

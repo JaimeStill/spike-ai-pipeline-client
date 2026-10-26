@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/JaimeStill/spike-ai-pipeline-client/protocol"
 )
@@ -15,13 +16,26 @@ import (
 // body. Instructions become a leading system message, and the input items messages:
 //
 //	message               a message of its role
-//	assistant run         one assistant message: content from the assistant message that
-//	                      opens the run, tool_calls from the function_calls after it, each
-//	                      call's id its call_id; a run of calls alone has no content
+//	assistant run         one assistant message: reasoning_content from the reasoning items
+//	                      that open the run, content from its assistant message, tool_calls
+//	                      from the function_calls after it, each call's id its call_id; a
+//	                      run of calls alone has no content
 //	function_call_output  a tool message, tool_call_id from its call_id
 //
-// An assistant run opens at an assistant message, or at a function_call no assistant message
-// opened, and takes the function_calls that follow it.
+// An assistant run opens at a reasoning item, at an assistant message no reasoning item opened,
+// or at a function_call no assistant message or reasoning item opened, and takes the
+// function_calls that follow it. Reasoning leads to what follows it, so a reasoning item always
+// opens a new run, joined by the reasoning items right after it; their texts go out
+// concatenated, in order, as reasoning_content.
+//
+// A reasoning item goes out through its encrypted_content alone: the envelope DecodeResponse
+// wrote there, which holds the reply's reasoning_content. Its content, which the spec's input
+// reasoning item lacks, is never sent. A reasoning item whose encrypted_content isn't this
+// format's envelope, being empty, another format's, another version's, or malformed, is
+// dropped: it is never sent, and it is never an error, so a conversation can carry another
+// format's reasoning through this one. So is one whose envelope holds no reasoning, and a run of
+// reasoning that no assistant message or function_call follows, since an assistant message
+// needs content or tool_calls, as llama.cpp b11669 requires.
 //
 // A message's content, and a tool message's, is a plain string when it is a single input_text
 // or output_text part and an array of parts otherwise: text, refusal, image_url for an
@@ -33,12 +47,14 @@ import (
 // string, a named function as {"type":"function","function":{"name"}}, and an allowed set as
 // {"type":"allowed_tools","allowed_tools":{"mode","tools"}}, its tools named the same way. An
 // allowed set of mode none has no Chat Completions form, whose allowed_tools modes are auto and
-// required, and is refused. MaxOutputTokens goes out as max_completion_tokens.
+// required, and is refused. Reasoning's effort goes out as reasoning_effort, and MaxOutputTokens
+// as max_completion_tokens.
 // Native's members, the native tier, are merged into the top level, and a member named like one
 // the typed fields set is refused. It adds no headers.
 func (*Format) EncodeRequest(req *protocol.Request, _ http.Header) ([]byte, error) {
 	body := request{
 		Model:               req.Model,
+		ReasoningEffort:     string(req.Reasoning.Effort),
 		MaxCompletionTokens: req.MaxOutputTokens,
 		Native:              req.Native,
 	}
@@ -80,30 +96,39 @@ func (*Format) EncodeRequest(req *protocol.Request, _ http.Header) ([]byte, erro
 }
 
 // encodeInput encodes the input items as messages, folding each run of assistant items into one
-// assistant message. A run opens at an assistant message, or at a function_call no assistant
-// message opened, takes the function_calls that follow, and closes at any other item.
+// assistant message, as EncodeRequest describes.
 func encodeInput(items []protocol.Item) ([]message, error) {
 	var messages []message
 	// run is the index in messages of the open run's assistant message, or -1 when no run is
-	// open. The reasoning items that precede an assistant turn are the run's to fold in too,
-	// as reasoning_content, once the format covers them.
-	run := -1
+	// open or the open run is reasoning alone so far. reasoning is that reasoning, the
+	// reasoning_content of the assistant message that joins the run, empty when there is none.
+	run, reasoning := -1, ""
 	for i, it := range items {
 		switch it := it.(type) {
+		case protocol.Reasoning:
+			text, ok := openEnvelope(it.EncryptedContent)
+			if !ok || text == "" {
+				continue
+			}
+			run = -1
+			reasoning += text
 		case protocol.Message:
 			content, err := encodeContent(it.Content)
 			if err != nil {
 				return nil, fmt.Errorf("input %d: %w", i, err)
 			}
-			messages = append(messages, message{Role: string(it.Role), Content: content})
+			m := message{Role: string(it.Role), Content: content}
 			run = -1
 			if it.Role == protocol.RoleAssistant {
-				run = len(messages) - 1
+				m.ReasoningContent = reasoning
+				run = len(messages)
 			}
+			messages = append(messages, m)
+			reasoning = ""
 		case protocol.FunctionCall:
 			if run < 0 {
-				messages = append(messages, message{Role: string(protocol.RoleAssistant)})
-				run = len(messages) - 1
+				messages = append(messages, message{Role: string(protocol.RoleAssistant), ReasoningContent: reasoning})
+				run, reasoning = len(messages)-1, ""
 			}
 			args := it.Arguments
 			if args == "" {
@@ -120,12 +145,31 @@ func encodeInput(items []protocol.Item) ([]message, error) {
 				return nil, fmt.Errorf("input %d: %w", i, err)
 			}
 			messages = append(messages, message{Role: "tool", Content: content, ToolCallID: it.CallID})
-			run = -1
+			run, reasoning = -1, ""
 		default:
 			return nil, fmt.Errorf("input %d: item %T has no Chat Completions form", i, it)
 		}
 	}
 	return messages, nil
+}
+
+// openEnvelope returns the reasoning_content the envelope sealed in encryptedContent holds, and
+// whether encryptedContent is this format's envelope at all: false for one that is empty,
+// another format's or version's, or malformed.
+func openEnvelope(encryptedContent string) (string, bool) {
+	rest, ok := strings.CutPrefix(encryptedContent, envelopePrefix)
+	if !ok {
+		return "", false
+	}
+	b, err := base64.StdEncoding.DecodeString(rest)
+	if err != nil {
+		return "", false
+	}
+	var e envelope
+	if json.Unmarshal(b, &e) != nil {
+		return "", false
+	}
+	return e.ReasoningContent, true
 }
 
 // encodeOutput encodes a function_call_output's result as a tool message's content: its output

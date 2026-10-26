@@ -10,6 +10,8 @@ type request struct {
 	// ToolChoice is "auto", "none", "required", or a namedToolChoice or allowedToolsChoice
 	// object.
 	ToolChoice jsontext.Value `json:"tool_choice,omitzero"`
+	// ReasoningEffort carries reasoning.effort.
+	ReasoningEffort string `json:"reasoning_effort,omitzero"`
 	// MaxCompletionTokens carries max_output_tokens. llama.cpp b11669 reads it and max_tokens
 	// alike, as aliases of n_predict; max_completion_tokens is the name OpenAI keeps, having
 	// deprecated max_tokens.
@@ -21,13 +23,15 @@ type request struct {
 
 // message is a Chat Completions message. Content is a string when the message is a single text
 // part, and an array of parts otherwise; an assistant message of tool calls alone omits it.
-// ToolCalls are an assistant message's calls, and ToolCallID names the call a tool message
-// answers.
+// ReasoningContent is the reasoning that led to an assistant message, the field llama.cpp and
+// other OpenAI-compatible servers name so. ToolCalls are an assistant message's calls, and
+// ToolCallID names the call a tool message answers.
 type message struct {
-	Role       string         `json:"role"`
-	Content    jsontext.Value `json:"content,omitzero"`
-	ToolCalls  []toolCall     `json:"tool_calls,omitzero"`
-	ToolCallID string         `json:"tool_call_id,omitzero"`
+	Role             string         `json:"role"`
+	Content          jsontext.Value `json:"content,omitzero"`
+	ReasoningContent string         `json:"reasoning_content,omitzero"`
+	ToolCalls        []toolCall     `json:"tool_calls,omitzero"`
+	ToolCallID       string         `json:"tool_call_id,omitzero"`
 }
 
 // tool is a Chat Completions tool, always a function.
@@ -121,13 +125,14 @@ type refusalPart struct {
 }
 
 // response is the part of a Chat Completions response body the format reads. Members it
-// doesn't read, such as reasoning_content and llama.cpp's timings, are ignored.
+// doesn't read, such as llama.cpp's timings, are ignored.
 type response struct {
 	Choices []struct {
 		Message struct {
-			Content   string     `json:"content"`
-			Refusal   string     `json:"refusal"`
-			ToolCalls []toolCall `json:"tool_calls"`
+			Content          string     `json:"content"`
+			ReasoningContent string     `json:"reasoning_content"`
+			Refusal          string     `json:"refusal"`
+			ToolCalls        []toolCall `json:"tool_calls"`
 		} `json:"message"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
@@ -152,4 +157,22 @@ type errorObject struct {
 	Message string         `json:"message"`
 	Type    string         `json:"type"`
 	Code    jsontext.Value `json:"code"`
+}
+
+// envelopePrefix opens every envelope this format writes: the implementor slug, the format, and
+// the envelope's version. A Reasoning item's encrypted_content without it was written by another
+// format, or by another version of this one, and isn't this format's to read.
+const envelopePrefix = "spike-ai-pipeline:completions/v1:"
+
+// envelope is what this format writes into a Reasoning item's encrypted_content when it decodes
+// a reply, and reads back when it encodes the item: what it must resend for the reasoning. Its
+// layout is envelopePrefix followed by the envelope as JSON in standard, padded base64:
+//
+//	spike-ai-pipeline:completions/v1:eyJyZWFzb25pbmdfY29udGVudCI6Ii4uLiJ9
+//
+// A change to the layout or the members' meaning is a new version, and a new prefix.
+type envelope struct {
+	// ReasoningContent is the reply's reasoning_content, which goes back as the assistant
+	// message's.
+	ReasoningContent string `json:"reasoning_content"`
 }

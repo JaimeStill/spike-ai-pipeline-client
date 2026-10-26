@@ -73,18 +73,26 @@ func readTestdata(t *testing.T, name string) []byte {
 }
 
 // completedText returns the output_text of resp, failing t unless resp is completed and its
-// output is one completed assistant message with non-empty output_text.
+// output is one completed assistant message with non-empty output_text, after the reasoning a
+// reasoning model puts ahead of it.
 func completedText(t *testing.T, resp *protocol.Response) string {
 	t.Helper()
 	if resp.Status != protocol.StatusCompleted {
 		t.Fatalf("Status = %q (%+v), want completed", resp.Status, resp.IncompleteDetails)
 	}
-	if len(resp.Output) != 1 {
-		t.Fatalf("Output has %d items, want 1 message: %#v", len(resp.Output), resp.Output)
+	output := resp.Output
+	for len(output) > 0 {
+		if _, ok := output[0].(protocol.Reasoning); !ok {
+			break
+		}
+		output = output[1:]
 	}
-	m, ok := resp.Output[0].(protocol.Message)
+	if len(output) != 1 {
+		t.Fatalf("Output has %d items after its reasoning, want 1 message: %#v", len(output), resp.Output)
+	}
+	m, ok := output[0].(protocol.Message)
 	if !ok || m.Role != protocol.RoleAssistant || m.Status != protocol.StatusCompleted {
-		t.Fatalf("Output[0] = %#v, want a completed assistant message", resp.Output[0])
+		t.Fatalf("Output's message = %#v, want a completed assistant message", output[0])
 	}
 	var text strings.Builder
 	for _, p := range m.Content {
