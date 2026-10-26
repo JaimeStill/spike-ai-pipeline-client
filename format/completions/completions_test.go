@@ -368,6 +368,67 @@ func TestEncode(t *testing.T) {
 			want: `{"model":"m","messages":[{"role":"user","content":"hi"}],"reasoning_effort":"xhigh"}`,
 		},
 		{
+			name: "plain text format as response_format text",
+			req: &protocol.Request{
+				Model: "m",
+				Input: []protocol.Item{text(protocol.RoleUser, "hi")},
+				Text:  protocol.TextParam{Format: protocol.PlainTextFormat{}},
+			},
+			want: `{"model":"m","messages":[{"role":"user","content":"hi"}],"response_format":{"type":"text"}}`,
+		},
+		{
+			name: "json_schema format, strict, every field set",
+			req: &protocol.Request{
+				Model: "m",
+				Input: []protocol.Item{text(protocol.RoleUser, "Capital of France?")},
+				Text: protocol.TextParam{Format: protocol.JSONSchemaFormat{
+					Name:        "capital",
+					Description: "A country's capital.",
+					Schema:      []byte(`{"type":"object","properties":{"capital":{"type":"string"}},"required":["capital"]}`),
+					Strict:      true,
+				}},
+			},
+			want: `{"model":"m","messages":[{"role":"user","content":"Capital of France?"}],
+				"response_format":{"type":"json_schema","json_schema":{
+					"name":"capital",
+					"description":"A country's capital.",
+					"schema":{"type":"object","properties":{"capital":{"type":"string"}},"required":["capital"]},
+					"strict":true}}}`,
+		},
+		{
+			name: "json_schema format, not strict, unset members omitted",
+			req: &protocol.Request{
+				Model: "m",
+				Input: []protocol.Item{text(protocol.RoleUser, "Capital of France?")},
+				Text: protocol.TextParam{Format: protocol.JSONSchemaFormat{
+					Name:   "capital",
+					Schema: []byte(`{"type":"object"}`),
+				}},
+			},
+			want: `{"model":"m","messages":[{"role":"user","content":"Capital of France?"}],
+				"response_format":{"type":"json_schema","json_schema":{"name":"capital","schema":{"type":"object"}}}}`,
+		},
+		{
+			// The spec's request has no json_object format; Chat Completions' JSON mode is
+			// reached through the native tier.
+			name: "native response_format json_object when text format is unset",
+			req: &protocol.Request{
+				Model:  "m",
+				Input:  []protocol.Item{text(protocol.RoleUser, "hi")},
+				Native: jsontext.Value(`{"response_format":{"type":"json_object"}}`),
+			},
+			want: `{"model":"m","messages":[{"role":"user","content":"hi"}],"response_format":{"type":"json_object"}}`,
+		},
+		{
+			name: "verbosity as verbosity",
+			req: &protocol.Request{
+				Model: "m",
+				Input: []protocol.Item{text(protocol.RoleUser, "hi")},
+				Text:  protocol.TextParam{Verbosity: protocol.VerbosityLow},
+			},
+			want: `{"model":"m","messages":[{"role":"user","content":"hi"}],"verbosity":"low"}`,
+		},
+		{
 			name: "reasoning joins the assistant message and calls after it",
 			req: &protocol.Request{Model: "m", Input: []protocol.Item{
 				text(protocol.RoleUser, "Weather in Paris?"),
@@ -551,15 +612,19 @@ func TestReasoningRoundTrip(t *testing.T) {
 }
 
 func TestEncodeRefusesNativeClash(t *testing.T) {
+	jsonSchema := protocol.TextParam{Format: protocol.JSONSchemaFormat{Name: "capital", Schema: []byte(`{}`)}}
 	cases := []struct {
 		name   string
 		max    int
+		text   protocol.TextParam
 		native string
 		member string
 	}{
-		{"model", 0, `{"model":"other"}`, "model"},
-		{"messages", 0, `{"temperature":0.2,"messages":[]}`, "messages"},
-		{"max_completion_tokens when set", 64, `{"max_completion_tokens":32}`, "max_completion_tokens"},
+		{"model", 0, protocol.TextParam{}, `{"model":"other"}`, "model"},
+		{"messages", 0, protocol.TextParam{}, `{"temperature":0.2,"messages":[]}`, "messages"},
+		{"max_completion_tokens when set", 64, protocol.TextParam{}, `{"max_completion_tokens":32}`, "max_completion_tokens"},
+		{"response_format when set", 0, jsonSchema, `{"response_format":{"type":"json_object"}}`, "response_format"},
+		{"verbosity when set", 0, protocol.TextParam{Verbosity: protocol.VerbosityHigh}, `{"verbosity":"low"}`, "verbosity"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -567,6 +632,7 @@ func TestEncodeRefusesNativeClash(t *testing.T) {
 				Model:           "m",
 				Input:           []protocol.Item{text(protocol.RoleUser, "hi")},
 				MaxOutputTokens: tc.max,
+				Text:            tc.text,
 				Native:          jsontext.Value(tc.native),
 			})
 			if err == nil {

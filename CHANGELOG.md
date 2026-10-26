@@ -52,5 +52,13 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
   `encrypted_content`; it sends that text back as the `reasoning_content` of the assistant
   message the reasoning led to, and drops a reasoning item whose `encrypted_content` isn't its
   envelope. The effort goes out as `reasoning_effort`.
+- Structured output: `Request.Text`, a `protocol.TextParam` of a `Format` and a `Verbosity`
+  (low, medium, high). `Format` is a closed `protocol.TextFormat`, the spec's request formats: a
+  `PlainTextFormat` or a `JSONSchemaFormat` (name, description, JSON Schema, strict); nil leaves
+  it to the endpoint. `Request.Validate` requires a json_schema format's name, in the spec's
+  pattern, and a schema that is a JSON object. The response's output_text is the JSON the model
+  produced, which the caller decodes. Chat Completions sends the format as `response_format`
+  (`{"type":"text"}`, or `{"type":"json_schema","json_schema":{...}}`) and the verbosity as
+  `verbosity`.
 
 [Unreleased]: https://github.com/JaimeStill/spike-ai-pipeline-client/commits/main

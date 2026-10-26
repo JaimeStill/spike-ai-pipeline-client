@@ -24,7 +24,14 @@
 // Its exported identifiers:
 //
 //   - [Request] is a request for a response: model, instructions, input, tools, tool choice,
-//     reasoning, and the native tier.
+//     reasoning, text, and the native tier.
+//   - [TextParam] configures the model's text output: its format and verbosity.
+//   - [TextFormat] is the form of the model's output_text, a closed set.
+//   - [PlainTextFormat] has the model answer in plain text, the text format.
+//   - [JSONSchemaFormat] has the model answer with JSON a schema describes, the json_schema
+//     format; the caller decodes the output_text.
+//   - [Verbosity] is how much detail the model's text gives: [VerbosityLow],
+//     [VerbosityMedium], or [VerbosityHigh].
 //   - [ReasoningParam] configures the model's reasoning: its effort.
 //   - [ReasoningEffort] is how much the model reasons: [ReasoningEffortNone],
 //     [ReasoningEffortLow], [ReasoningEffortMedium], [ReasoningEffortHigh], or

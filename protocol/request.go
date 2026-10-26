@@ -21,6 +21,9 @@ type Request struct {
 	ToolChoice ToolChoice
 	// Reasoning configures the model's reasoning. Its zero value leaves it to the endpoint.
 	Reasoning ReasoningParam
+	// Text configures the model's text output: its format, such as a JSON schema, and its
+	// verbosity. Its zero value leaves both to the endpoint.
+	Text TextParam
 	// MaxOutputTokens bounds the tokens the model generates, reasoning included. Zero leaves
 	// the bound to the endpoint.
 	MaxOutputTokens int
@@ -63,8 +66,10 @@ const (
 // refuses nil, no model, no input, an item or content part that isn't one of this package's by
 // value (a *Message is refused), a message with an unknown role or no content, a part its role
 // doesn't take, an image with no URL or an unknown detail, an audio clip with no data or an
-// unknown format, a reasoning effort the spec doesn't define, a function_call with no call id or name or with arguments that aren't JSON, a
-// function_call_output with no call id, both output forms, or a part other than InputText, a
+// unknown format, a reasoning effort the spec doesn't define, a text format that isn't one of
+// this package's by value, a json_schema format with no name, a name the spec doesn't allow, or
+// a schema that isn't a JSON object, a verbosity the spec doesn't define, a function_call with
+// no call id or name or with arguments that aren't JSON, a function_call_output with no call id, both output forms, or a part other than InputText, a
 // tool with no name, a name the spec doesn't allow, or a name another tool has, parameters that
 // aren't a JSON object, a tool choice that isn't one of this package's by value, an unknown
 // mode, a named function or allowed tool the request doesn't declare, an allowed_tools choice
@@ -93,6 +98,9 @@ func (r *Request) validate() error {
 	case "", ReasoningEffortNone, ReasoningEffortLow, ReasoningEffortMedium, ReasoningEffortHigh, ReasoningEffortXHigh:
 	default:
 		return fmt.Errorf("request has unknown reasoning effort %q", r.Reasoning.Effort)
+	}
+	if err := validateText(r.Text); err != nil {
+		return fmt.Errorf("text: %w", err)
 	}
 	for i, it := range r.Input {
 		if err := validateItem(it); err != nil {
@@ -242,7 +250,7 @@ func validateTool(t FunctionTool, declared map[string]bool) error {
 	switch {
 	case t.Name == "":
 		return errors.New("tool has no name")
-	case !validToolName(t.Name):
+	case !validName(t.Name):
 		return fmt.Errorf("tool name %q isn't 1 to 64 letters, digits, underscores, and hyphens", t.Name)
 	case declared[t.Name]:
 		return fmt.Errorf("tool name %q is declared twice", t.Name)
@@ -252,9 +260,44 @@ func validateTool(t FunctionTool, declared map[string]bool) error {
 	return nil
 }
 
-// validToolName reports whether name matches the spec's pattern for a function's name,
-// ^[a-zA-Z0-9_-]+$, at most 64 characters long.
-func validToolName(name string) bool {
+// validateText refuses a format that isn't one of the package's by value, a json_schema format
+// that is malformed, and an unknown verbosity.
+func validateText(t TextParam) error {
+	switch f := t.Format.(type) {
+	case nil, PlainTextFormat:
+	case JSONSchemaFormat:
+		if err := validateJSONSchemaFormat(f); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("unsupported format %T", f)
+	}
+	switch t.Verbosity {
+	case "", VerbosityLow, VerbosityMedium, VerbosityHigh:
+		return nil
+	}
+	return fmt.Errorf("unknown verbosity %q", t.Verbosity)
+}
+
+// validateJSONSchemaFormat refuses a format whose name is missing or outside the spec's pattern,
+// and a schema that is missing or isn't a JSON object.
+func validateJSONSchemaFormat(f JSONSchemaFormat) error {
+	switch {
+	case f.Name == "":
+		return errors.New("json_schema format has no name")
+	case !validName(f.Name):
+		return fmt.Errorf("json_schema format name %q isn't 1 to 64 letters, digits, underscores, and hyphens", f.Name)
+	case len(f.Schema) == 0:
+		return fmt.Errorf("json_schema format %s has no schema", f.Name)
+	case f.Schema.Kind() != jsontext.KindBeginObject || !f.Schema.IsValid():
+		return fmt.Errorf("json_schema format %s's schema isn't a JSON object with unique member names", f.Name)
+	}
+	return nil
+}
+
+// validName reports whether name matches the spec's pattern for a function's name and a
+// json_schema format's, ^[a-zA-Z0-9_-]+$, at most 64 characters long.
+func validName(name string) bool {
 	if len(name) > 64 {
 		return false
 	}

@@ -49,14 +49,25 @@ import (
 // allowed set of mode none has no Chat Completions form, whose allowed_tools modes are auto and
 // required, and is refused. Reasoning's effort goes out as reasoning_effort, and MaxOutputTokens
 // as max_completion_tokens.
+//
+// Text's format goes out as response_format: plain text as {"type":"text"}, sent because the
+// caller set it, and a JSON schema as {"type":"json_schema","json_schema":{"name","schema"}},
+// with description and strict when set. Text's verbosity goes out as verbosity.
 // Native's members, the native tier, are merged into the top level, and a member named like one
 // the typed fields set is refused. It adds no headers.
 func (*Format) EncodeRequest(req *protocol.Request, _ http.Header) ([]byte, error) {
+	var err error
 	body := request{
 		Model:               req.Model,
 		ReasoningEffort:     string(req.Reasoning.Effort),
 		MaxCompletionTokens: req.MaxOutputTokens,
+		Verbosity:           string(req.Text.Verbosity),
 		Native:              req.Native,
+	}
+	if req.Text.Format != nil {
+		if body.ResponseFormat, err = encodeTextFormat(req.Text.Format); err != nil {
+			return nil, fmt.Errorf("completions: text format: %w", err)
+		}
 	}
 	if req.Instructions != "" {
 		content, err := json.Marshal(req.Instructions)
@@ -202,6 +213,23 @@ func encodeToolChoice(tc protocol.ToolChoice) (jsontext.Value, error) {
 		return json.Marshal(allowed)
 	default:
 		return nil, fmt.Errorf("tool choice %T has no Chat Completions form", tc)
+	}
+}
+
+// encodeTextFormat encodes a text format as response_format.
+func encodeTextFormat(f protocol.TextFormat) (*responseFormat, error) {
+	switch f := f.(type) {
+	case protocol.PlainTextFormat:
+		return &responseFormat{Type: "text"}, nil
+	case protocol.JSONSchemaFormat:
+		return &responseFormat{Type: "json_schema", JSONSchema: &jsonSchema{
+			Name:        f.Name,
+			Description: f.Description,
+			Schema:      f.Schema,
+			Strict:      f.Strict,
+		}}, nil
+	default:
+		return nil, fmt.Errorf("text format %T has no Chat Completions form", f)
 	}
 }
 

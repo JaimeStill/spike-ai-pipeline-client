@@ -12,6 +12,10 @@ type request struct {
 	ToolChoice jsontext.Value `json:"tool_choice,omitzero"`
 	// ReasoningEffort carries reasoning.effort.
 	ReasoningEffort string `json:"reasoning_effort,omitzero"`
+	// ResponseFormat carries text.format.
+	ResponseFormat *responseFormat `json:"response_format,omitzero"`
+	// Verbosity carries text.verbosity.
+	Verbosity string `json:"verbosity,omitzero"`
 	// MaxCompletionTokens carries max_output_tokens. llama.cpp b11669 reads it and max_tokens
 	// alike, as aliases of n_predict; max_completion_tokens is the name OpenAI keeps, having
 	// deprecated max_tokens.
@@ -85,6 +89,22 @@ type allowedToolsChoice struct {
 type allowedTools struct {
 	Mode  string            `json:"mode"`
 	Tools []namedToolChoice `json:"tools"`
+}
+
+// responseFormat is a Chat Completions response_format: of type text, or of type json_schema
+// with its JSONSchema.
+type responseFormat struct {
+	Type       string      `json:"type"`
+	JSONSchema *jsonSchema `json:"json_schema,omitzero"`
+}
+
+// jsonSchema is a json_schema response format's schema: its name and schema, and its description
+// and strict flag, each omitted when unset.
+type jsonSchema struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitzero"`
+	Schema      jsontext.Value `json:"schema"`
+	Strict      bool           `json:"strict,omitzero"`
 }
 
 // textPart is a Chat Completions text content part.

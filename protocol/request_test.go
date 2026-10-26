@@ -110,6 +110,21 @@ func TestValidateAccepts(t *testing.T) {
 		{"reasoning effort medium", with(func(r *protocol.Request) { r.Reasoning.Effort = protocol.ReasoningEffortMedium })},
 		{"reasoning effort high", with(func(r *protocol.Request) { r.Reasoning.Effort = protocol.ReasoningEffortHigh })},
 		{"reasoning effort xhigh", with(func(r *protocol.Request) { r.Reasoning.Effort = protocol.ReasoningEffortXHigh })},
+		{"plain text format", with(func(r *protocol.Request) { r.Text.Format = protocol.PlainTextFormat{} })},
+		{"json_schema format, every field set", with(func(r *protocol.Request) {
+			r.Text.Format = protocol.JSONSchemaFormat{
+				Name:        "Capital-2_x",
+				Description: "A country's capital.",
+				Schema:      []byte(`{"type":"object","properties":{"capital":{"type":"string"}}}`),
+				Strict:      true,
+			}
+		})},
+		{"json_schema format name of 64 characters", with(func(r *protocol.Request) {
+			r.Text.Format = protocol.JSONSchemaFormat{Name: strings.Repeat("a", 64), Schema: []byte(`{}`)}
+		})},
+		{"verbosity low", with(func(r *protocol.Request) { r.Text.Verbosity = protocol.VerbosityLow })},
+		{"verbosity medium", with(func(r *protocol.Request) { r.Text.Verbosity = protocol.VerbosityMedium })},
+		{"verbosity high", with(func(r *protocol.Request) { r.Text.Verbosity = protocol.VerbosityHigh })},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -285,6 +300,32 @@ func TestValidateRefuses(t *testing.T) {
 			r.Tools = []protocol.FunctionTool{{Name: "f"}}
 			r.ToolChoice = &protocol.FunctionToolChoice{Name: "f"}
 		}), "unsupported tool choice *protocol.FunctionToolChoice"},
+		{"json_schema format with no name", with(func(r *protocol.Request) {
+			r.Text.Format = protocol.JSONSchemaFormat{Schema: []byte(`{}`)}
+		}), "text: json_schema format has no name"},
+		{"json_schema format name with a space", with(func(r *protocol.Request) {
+			r.Text.Format = protocol.JSONSchemaFormat{Name: "a capital", Schema: []byte(`{}`)}
+		}), `json_schema format name "a capital" isn't`},
+		{"json_schema format name of 65 characters", with(func(r *protocol.Request) {
+			r.Text.Format = protocol.JSONSchemaFormat{Name: strings.Repeat("a", 65), Schema: []byte(`{}`)}
+		}), "isn't 1 to 64"},
+		{"json_schema format with no schema", with(func(r *protocol.Request) {
+			r.Text.Format = protocol.JSONSchemaFormat{Name: "capital"}
+		}), "json_schema format capital has no schema"},
+		{"json_schema format schema an array", with(func(r *protocol.Request) {
+			r.Text.Format = protocol.JSONSchemaFormat{Name: "capital", Schema: []byte(`[]`)}
+		}), "json_schema format capital's schema isn't a JSON object"},
+		{"json_schema format schema invalid", with(func(r *protocol.Request) {
+			r.Text.Format = protocol.JSONSchemaFormat{Name: "capital", Schema: []byte(`{"type":`)}
+		}), "json_schema format capital's schema isn't a JSON object"},
+		{"json_schema format schema with a duplicate member", with(func(r *protocol.Request) {
+			r.Text.Format = protocol.JSONSchemaFormat{Name: "capital", Schema: []byte(`{"type":"object","type":"string"}`)}
+		}), "json_schema format capital's schema isn't a JSON object"},
+		{"pointer text format", with(func(r *protocol.Request) {
+			r.Text.Format = &protocol.JSONSchemaFormat{Name: "capital", Schema: []byte(`{}`)}
+		}), "text: unsupported format *protocol.JSONSchemaFormat"},
+		{"unknown verbosity", with(func(r *protocol.Request) { r.Text.Verbosity = "max" }),
+			`text: unknown verbosity "max"`},
 		{"negative max output tokens", with(func(r *protocol.Request) { r.MaxOutputTokens = -1 }), "negative"},
 		{"native array", with(func(r *protocol.Request) { r.Native = []byte(`[1]`) }), "native field"},
 		{"native invalid", with(func(r *protocol.Request) { r.Native = []byte(`{"a":`) }), "native field"},
