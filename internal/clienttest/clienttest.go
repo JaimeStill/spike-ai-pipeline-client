@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sync"
 	"testing"
 )
@@ -66,7 +67,7 @@ func NewServer(t testing.TB, status int, reply string) *Server {
 func (s *Server) Requests() []Request {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]Request(nil), s.reqs...)
+	return slices.Clone(s.reqs)
 }
 
 // Only returns the one request the server received, failing t unless it received exactly one.

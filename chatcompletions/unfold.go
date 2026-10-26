@@ -30,10 +30,16 @@ type response struct {
 
 // DecodeResponse unfolds a Chat Completions response body. The first choice's message becomes
 // an assistant message item, its content an output_text part and its refusal a refusal part;
-// a message with neither gives no item. finish_reason gives the status: stop and tool_calls are
-// completed, length is incomplete for max_output_tokens, and content_filter is incomplete for
-// content_filter. The message item takes the response's status. Any other finish_reason, or a
-// body with no choices, is an error.
+// a message with neither gives no item. The first choice's finish_reason gives the response's
+// status, which the message item takes:
+//
+//	stop, tool_calls  completed
+//	length            incomplete, reason max_output_tokens
+//	content_filter    incomplete, reason content_filter
+//
+// Any other finish_reason, or a body with no choices, is an error. The reply's usage gives the
+// response's: prompt_tokens, completion_tokens, total_tokens, and
+// completion_tokens_details.reasoning_tokens.
 func (*Format) DecodeResponse(body []byte) (*client.Response, error) {
 	var wire response
 	if err := json.Unmarshal(body, &wire); err != nil {

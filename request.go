@@ -67,21 +67,21 @@ func validateItem(it Item) error {
 // doesn't take: input parts from the user, system, and developer, output parts from the
 // assistant.
 func validateMessage(m Message) error {
+	switch m.Role {
+	case RoleUser, RoleSystem, RoleDeveloper, RoleAssistant:
+	default:
+		return fmt.Errorf("message has unknown role %q", m.Role)
+	}
 	if len(m.Content) == 0 {
 		return fmt.Errorf("%s message has no content", m.Role)
 	}
 	for i, p := range m.Content {
 		var ok bool
-		switch m.Role {
-		case RoleUser, RoleSystem, RoleDeveloper:
-			_, ok = p.(InputText)
-		case RoleAssistant:
-			switch p.(type) {
-			case OutputText, Refusal:
-				ok = true
-			}
-		default:
-			return fmt.Errorf("message has unknown role %q", m.Role)
+		switch p.(type) {
+		case InputText:
+			ok = m.Role != RoleAssistant
+		case OutputText, Refusal:
+			ok = m.Role == RoleAssistant
 		}
 		if !ok {
 			return fmt.Errorf("%s message content %d: unsupported part %T", m.Role, i, p)

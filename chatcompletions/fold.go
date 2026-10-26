@@ -42,15 +42,13 @@ type refusalPart struct {
 	Refusal string `json:"refusal"`
 }
 
-// EncodeRequest folds req into a Chat Completions request body. Instructions become a leading
-// system message, and each message item a message of its role, its content a plain string when
-// it is a single text part and an array of parts otherwise. MaxOutputTokens goes out as
-// max_completion_tokens, and Native's members are merged into the top level. It adds no
-// headers.
+// EncodeRequest folds req, which the Client has validated, into a Chat Completions request
+// body. Instructions become a leading system message, and each message item a message of its
+// role, its content a plain string when it is a single input_text or output_text part and an
+// array of text and refusal parts otherwise. MaxOutputTokens goes out as max_completion_tokens.
+// Native's members, the native tier, are merged into the top level, and a member named like one
+// the typed fields set is refused. It adds no headers.
 func (*Format) EncodeRequest(req *client.Request, _ http.Header) ([]byte, error) {
-	if req == nil {
-		return nil, errors.New("chatcompletions: no request")
-	}
 	body := request{
 		Model:               req.Model,
 		MaxCompletionTokens: req.MaxOutputTokens,

@@ -9,7 +9,6 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
-	"strings"
 )
 
 // TokenSource returns the bearer token for one request. The Client calls it once per request, so
@@ -109,9 +108,7 @@ func (c *Client) Respond(ctx context.Context, req *Request) (*Response, error) {
 // endpoint is the URL of route: the base path and route joined by exactly one slash, with the
 // Config's query.
 func (c *Client) endpoint(route string) string {
-	u := c.base
-	u.Path = strings.TrimSuffix(u.Path, "/") + "/" + strings.TrimPrefix(route, "/")
-	u.RawPath = ""
+	u := c.base.JoinPath(route)
 	u.RawQuery = c.query
 	return u.String()
 }
