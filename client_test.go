@@ -3,6 +3,7 @@ package client_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -166,12 +167,12 @@ func TestRespondToken(t *testing.T) {
 
 func TestRespondCallsTokenSourceOncePerRequest(t *testing.T) {
 	srv := clienttest.NewServer(t, http.StatusOK, okReply)
-	var calls []string
+	calls := 0
 	c := newClient(t, client.Config{
 		BaseURL: srv.URL,
 		Token: func(context.Context) (string, error) {
-			calls = append(calls, "call")
-			return "t" + string(rune('0'+len(calls))), nil
+			calls++
+			return fmt.Sprintf("t%d", calls), nil
 		},
 	})
 	for range 2 {
@@ -179,8 +180,8 @@ func TestRespondCallsTokenSourceOncePerRequest(t *testing.T) {
 			t.Fatalf("Respond: %v", err)
 		}
 	}
-	if len(calls) != 2 {
-		t.Fatalf("token source called %d times for 2 requests, want 2", len(calls))
+	if calls != 2 {
+		t.Fatalf("token source called %d times for 2 requests, want 2", calls)
 	}
 	reqs := srv.Requests()
 	for i, want := range []string{"Bearer t1", "Bearer t2"} {
@@ -206,48 +207,46 @@ func TestRespondTokenErrorSendsNothing(t *testing.T) {
 	}
 }
 
+// TestRespondAPIError covers what the Client makes of a non-2xx reply: an *APIError with the
+// status and the whole body, its text built from the details the Format decoded or, without a
+// message, from the start of the body. What the Format decodes is chatcompletions' test.
 func TestRespondAPIError(t *testing.T) {
+	long := strings.Repeat("x", 600)
 	cases := []struct {
 		name   string
 		status int
 		reply  string
-		want   client.APIError
 		text   string
 	}{
 		{
-			name:   "numeric code",
+			name:   "message, type, and code",
 			status: http.StatusBadRequest,
 			reply:  `{"error":{"code":400,"message":"model 'x' not found","type":"invalid_request_error"}}`,
-			want:   client.APIError{Status: 400, Message: "model 'x' not found", Type: "invalid_request_error", Code: "400"},
 			text:   "400 Bad Request: model 'x' not found (invalid_request_error, 400)",
-		},
-		{
-			name:   "string code",
-			status: http.StatusTooManyRequests,
-			reply:  `{"error":{"message":"slow down","type":"rate_limit","code":"rate_limit_exceeded","param":null}}`,
-			want:   client.APIError{Status: 429, Message: "slow down", Type: "rate_limit", Code: "rate_limit_exceeded"},
-			text:   "429 Too Many Requests: slow down (rate_limit, rate_limit_exceeded)",
 		},
 		{
 			name:   "message only",
 			status: http.StatusInternalServerError,
 			reply:  `{"error":{"message":"boom"}}`,
-			want:   client.APIError{Status: 500, Message: "boom"},
 			text:   "500 Internal Server Error: boom",
 		},
 		{
-			name:   "string error",
-			status: http.StatusServiceUnavailable,
-			reply:  `{"error":"loading model"}`,
-			want:   client.APIError{Status: 503, Message: "loading model"},
-			text:   "503 Service Unavailable: loading model",
-		},
-		{
-			name:   "not JSON",
+			name:   "no message",
 			status: http.StatusBadGateway,
 			reply:  "upstream down\n",
-			want:   client.APIError{Status: 502},
 			text:   "502 Bad Gateway: upstream down",
+		},
+		{
+			name:   "no message, long body",
+			status: http.StatusBadGateway,
+			reply:  long,
+			text:   "502 Bad Gateway: " + long[:512] + "...",
+		},
+		{
+			name:   "empty body",
+			status: http.StatusServiceUnavailable,
+			reply:  "",
+			text:   "503 Service Unavailable",
 		},
 	}
 	for _, tc := range cases {
@@ -255,15 +254,12 @@ func TestRespondAPIError(t *testing.T) {
 			srv := clienttest.NewServer(t, tc.status, tc.reply)
 			c := newClient(t, client.Config{BaseURL: srv.URL})
 			resp, err := c.Respond(t.Context(), hello())
-			var apiErr *client.APIError
-			if !errors.As(err, &apiErr) {
+			apiErr, ok := errors.AsType[*client.APIError](err)
+			if !ok {
 				t.Fatalf("Respond = %v, %v; want an *APIError", resp, err)
 			}
-			if apiErr.Status != tc.want.Status || apiErr.Message != tc.want.Message ||
-				apiErr.Type != tc.want.Type || apiErr.Code != tc.want.Code {
-				t.Errorf("APIError = {%d %q %q %q}, want {%d %q %q %q}",
-					apiErr.Status, apiErr.Message, apiErr.Type, apiErr.Code,
-					tc.want.Status, tc.want.Message, tc.want.Type, tc.want.Code)
+			if apiErr.Status != tc.status {
+				t.Errorf("APIError.Status = %d, want %d", apiErr.Status, tc.status)
 			}
 			if string(apiErr.Body) != tc.reply {
 				t.Errorf("APIError.Body = %q, want %q", apiErr.Body, tc.reply)
@@ -331,6 +327,9 @@ func TestRespondRefusesRequest(t *testing.T) {
 		}), "unsupported item *client.Message"},
 		{"unknown role", with(func(r *client.Request) {
 			r.Input = []client.Item{client.Message{Role: "tool", Content: []client.ContentPart{client.InputText{Text: "hi"}}}}
+		}), `unknown role "tool"`},
+		{"unknown role, no content", with(func(r *client.Request) {
+			r.Input = []client.Item{client.Message{Role: "tool"}}
 		}), `unknown role "tool"`},
 		{"no content", with(func(r *client.Request) { r.Input = []client.Item{user()} }), "has no content"},
 		{"nil part", with(func(r *client.Request) { r.Input = []client.Item{user(nil)} }), "unsupported part"},
