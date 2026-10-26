@@ -282,8 +282,9 @@ func TestTranscribeReaderError(t *testing.T) {
 	}
 }
 
-// stallingReader is a clip that gives one chunk, then, once the request has reached the server,
-// stalls until ctx ends, and fails with ctx's error.
+// stallingReader is a clip, such as a slow file, that gives one chunk, then, once the request
+// has reached the server, stalls until ctx ends, and gives another chunk: a clip that never
+// fails, so the upload's failure is the request's alone.
 type stallingReader struct {
 	ctx     context.Context
 	arrived <-chan struct{}
@@ -296,19 +297,20 @@ type stallingReader struct {
 
 func (r *stallingReader) Read(p []byte) (int, error) {
 	r.reads++
-	if r.reads == 1 {
-		return copy(p, clip(len(p))), nil
+	if r.reads == 2 {
+		<-r.arrived
+		close(r.stalled)
+		<-r.ctx.Done()
+		r.ended.Store(true)
 	}
-	<-r.arrived
-	close(r.stalled)
-	<-r.ctx.Done()
-	r.ended.Store(true)
-	return 0, r.ctx.Err()
+	return copy(p, clip(len(p))), nil
 }
 
 // TestTranscribeCancelMidUpload cancels the context while the clip is partly uploaded: the
 // request has reached the server, so the upload streams rather than buffering the clip, and
-// Transcribe returns ctx's error promptly, only after the upload stopped reading the clip.
+// Transcribe returns ctx's error promptly, only after the upload stopped reading the clip. The
+// clip itself never fails, so the error is the cancellation's, not the upload's write into the
+// pipe the cancelled request closed.
 func TestTranscribeCancelMidUpload(t *testing.T) {
 	base, arrived := drainServer(t)
 	c := newClient(t, client.Config{BaseURL: base})

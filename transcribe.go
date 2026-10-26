@@ -14,10 +14,6 @@ import (
 // transcriptionsRoute is the OpenAI-compatible transcription endpoint, relative to the base URL.
 const transcriptionsRoute = "audio/transcriptions"
 
-// errUploadStopped ends an upload whose request is over before the whole form was read: a
-// cancelled context, a transport failure, a token source error, or a reply sent early.
-var errUploadStopped = errors.New("upload stopped")
-
 // TranscriptionRequest asks an audio model for the text of a clip. Transcription sits outside
 // the protocol and the Format: it goes to the OpenAI-compatible transcription endpoint whatever
 // format the Client speaks.
@@ -76,8 +72,9 @@ type TranscriptionUsage struct {
 // goroutine's next write fails. A File whose Read blocks holds Transcribe until the Read
 // returns.
 //
-// A File read error is returned wrapped, as is a transport failure or a cancelled ctx. A non-2xx
-// reply is an *APIError with the OpenAI-style error body's details.
+// A File read error is returned wrapped, ahead of whatever the transport made of the upload it
+// cut short. A transport failure or a cancelled ctx is returned wrapped too. A non-2xx reply is
+// an *APIError with the OpenAI-style error body's details.
 func (c *Client) Transcribe(ctx context.Context, req TranscriptionRequest) (*Transcription, error) {
 	switch {
 	case req.Model == "":
@@ -87,24 +84,27 @@ func (c *Client) Transcribe(ctx context.Context, req TranscriptionRequest) (*Tra
 	case req.FileName == "":
 		return nil, errors.New("client: transcribe: request has no file name")
 	}
+	file := &clipReader{r: req.File}
+	req.File = file
 	pr, pw := io.Pipe()
 	form := multipart.NewWriter(pw)
-	uploaded := make(chan error, 1)
+	uploaded := make(chan struct{})
 	go func() {
-		err := writeTranscriptionForm(form, req)
+		defer close(uploaded)
 		// The writer's error, or EOF on nil, ends the request body's read.
-		pw.CloseWithError(err)
-		uploaded <- err
+		pw.CloseWithError(writeTranscriptionForm(form, req))
 	}()
 	reply, err := c.post(ctx, transcriptionsRoute, nil, pr, form.FormDataContentType(), format.DecodeOpenAIError)
 	// A request that ended before reading the whole form leaves the goroutine blocked on the
 	// pipe; closing the read side fails its write, and it ends. After a whole read, this is a
 	// no-op.
-	pr.CloseWithError(errUploadStopped)
-	if uerr := <-uploaded; uerr != nil && !errors.Is(uerr, errUploadStopped) && err != nil {
+	_ = pr.Close()
+	<-uploaded
+	if file.err != nil {
 		// The upload failed on its own, reading File: that is the cause, whatever the
-		// transport made of the body's failed read.
-		return nil, fmt.Errorf("client: transcribe: upload: %w", uerr)
+		// transport made of the body's failed read. Any other failure of the goroutine's is a
+		// write into the pipe the request closed, which err accounts for.
+		return nil, fmt.Errorf("client: transcribe: upload: %w", file.err)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("client: transcribe: %w", err)
@@ -142,6 +142,21 @@ func writeTranscriptionForm(form *multipart.Writer, req TranscriptionRequest) er
 		return err
 	}
 	return form.Close()
+}
+
+// clipReader is a TranscriptionRequest's File as the upload reads it, keeping the error a Read
+// returned, other than io.EOF, so Transcribe can tell the clip's failure from the request's.
+type clipReader struct {
+	r   io.Reader
+	err error
+}
+
+func (c *clipReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	if err != nil && err != io.EOF {
+		c.err = err
+	}
+	return n, err
 }
 
 // decodeTranscription decodes the body of a 2xx transcription reply.
