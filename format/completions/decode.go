@@ -11,8 +11,10 @@ import (
 
 // DecodeResponse decodes a Chat Completions response body. The first choice's message becomes
 // an assistant message item, its content an output_text part and its refusal a refusal part;
-// a message with neither gives no item. The first choice's finish_reason gives the response's
-// status, which the message item takes:
+// a message with neither gives no message item. Each of its tool_calls then becomes a
+// function_call item, in order, its call_id the call's id; a call of a type other than function
+// is an error. The first choice's finish_reason gives the response's status, which the items
+// take:
 //
 //	stop, tool_calls  completed
 //	length            incomplete, reason max_output_tokens
@@ -64,6 +66,17 @@ func (*Format) DecodeResponse(body []byte) (*protocol.Response, error) {
 			Status:  resp.Status,
 			Role:    protocol.RoleAssistant,
 			Content: content,
+		})
+	}
+	for i, c := range choice.Message.ToolCalls {
+		if c.Type != "function" {
+			return nil, fmt.Errorf("completions: response tool call %d has unknown type %q", i, c.Type)
+		}
+		resp.Output = append(resp.Output, protocol.FunctionCall{
+			Status:    resp.Status,
+			CallID:    c.ID,
+			Name:      c.Function.Name,
+			Arguments: c.Function.Arguments,
 		})
 	}
 	return resp, nil

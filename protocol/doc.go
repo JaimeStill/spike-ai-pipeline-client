@@ -23,7 +23,8 @@
 //
 // Its exported identifiers:
 //
-//   - [Request] is a request for a response: model, instructions, input, and the native tier.
+//   - [Request] is a request for a response: model, instructions, input, tools, tool choice,
+//     and the native tier.
 //   - [Request.Validate] refuses a request the model can't describe.
 //   - [Response] is a model's response: output, status, and usage.
 //   - [IncompleteDetails] says why a response is incomplete.
@@ -45,4 +46,13 @@
 //   - [AudioFormat] is a clip's encoding: [AudioFormatWAV] or [AudioFormatMP3].
 //   - [OutputText] is text output, output_text.
 //   - [Refusal] is the model's refusal, refusal.
+//   - [FunctionCall] is a function_call item: the model's call of a function tool.
+//   - [FunctionCallOutput] is a function_call_output item: a call's result, as a string or
+//     parts.
+//   - [FunctionTool] is a function the model may call, the spec's one tool kind.
+//   - [ToolChoice] controls which tool the model calls, a closed set.
+//   - [ToolChoiceMode] is a choice of mode, and an allowed set's: [ToolChoiceAuto],
+//     [ToolChoiceNone], or [ToolChoiceRequired].
+//   - [FunctionToolChoice] has the model call one named function.
+//   - [AllowedToolChoice] narrows the tools the model may call to a set, with a mode.
 package protocol

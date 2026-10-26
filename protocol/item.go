@@ -129,6 +129,51 @@ type Refusal struct {
 
 func (Refusal) contentPart() {}
 
+// FunctionCall is a function_call item: the model's call of a function tool the request
+// declared. It comes back in a response's Output, and goes back in the next request's Input,
+// ahead of the FunctionCallOutput that answers it.
+type FunctionCall struct {
+	// ID is the item's id, when the format supplies one. Chat Completions doesn't.
+	ID string
+	// Status is the item's status in a response's output, when the format supplies one. It is
+	// ignored on input.
+	Status Status
+	// CallID is the model's id for the call, which the FunctionCallOutput answering it
+	// repeats. It is required.
+	CallID string
+	// Name is the name of the function called. It is required.
+	Name string
+	// Arguments is the call's arguments as JSON text, such as `{"city":"Paris"}`, as the
+	// model produced them. Empty means no arguments; otherwise it is valid JSON.
+	Arguments string
+}
+
+func (FunctionCall) item() {}
+
+// FunctionCallOutput is a function_call_output item: the result of a FunctionCall, which the
+// caller ran, sent back as input. The spec's output is a string or an array of content parts,
+// and the item holds either: Output for the string, OutputParts for the array. OutputParts
+// takes the spec's part types for it in the stateless subset this client covers, InputText
+// alone; it is a []ContentPart rather than a []InputText so the image and file parts the spec
+// also allows there can join it without changing the field.
+type FunctionCallOutput struct {
+	// ID is the item's id, when the format supplies one.
+	ID string
+	// Status is the item's status, when the format supplies one. It is ignored on input.
+	Status Status
+	// CallID is the CallID of the FunctionCall this answers. It is required.
+	CallID string
+	// Output is the function's result as a string, such as JSON text. It is empty when
+	// OutputParts holds the result instead; an empty Output with no OutputParts is an empty
+	// result.
+	Output string
+	// OutputParts is the function's result as content parts, InputText, in place of Output.
+	// When it is set, Output is empty.
+	OutputParts []ContentPart
+}
+
+func (FunctionCallOutput) item() {}
+
 // Status is the status of a response or of an item in its output.
 type Status string
 

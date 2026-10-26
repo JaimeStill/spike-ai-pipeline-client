@@ -53,6 +53,35 @@ func text(role protocol.Role, s string) protocol.Message {
 	return protocol.Message{Role: role, Content: []protocol.ContentPart{protocol.InputText{Text: s}}}
 }
 
+// weather is a function tool with every field set.
+var weather = protocol.FunctionTool{
+	Name:        "get_weather",
+	Description: "Get the current weather in a city.",
+	Parameters:  jsontext.Value(`{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}`),
+	Strict:      true,
+}
+
+// withTools is a request of one user message with weather and a get_time tool of name alone,
+// and the tool choice tc.
+func withTools(tc protocol.ToolChoice) *protocol.Request {
+	return &protocol.Request{
+		Model:      "m",
+		Input:      []protocol.Item{text(protocol.RoleUser, "hi")},
+		Tools:      []protocol.FunctionTool{weather, {Name: "get_time"}},
+		ToolChoice: tc,
+	}
+}
+
+// toolsWire is the wire tools of withTools.
+const toolsWire = `"tools":[
+	{"type":"function","function":{"name":"get_weather","description":"Get the current weather in a city.",
+		"parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]},"strict":true}},
+	{"type":"function","function":{"name":"get_time"}}]`
+
+func assistant(s string) protocol.Message {
+	return protocol.Message{Role: protocol.RoleAssistant, Content: []protocol.ContentPart{protocol.OutputText{Text: s}}}
+}
+
 func TestEncode(t *testing.T) {
 	cases := []struct {
 		name string
@@ -166,6 +195,144 @@ func TestEncode(t *testing.T) {
 				{"type":"input_audio","input_audio":{"data":"//uQ","format":"mp3"}}]}]}`,
 		},
 		{
+			name: "tools as function tools, unset members omitted",
+			req:  withTools(nil),
+			want: `{"model":"m","messages":[{"role":"user","content":"hi"}],` + toolsWire + `}`,
+		},
+		{
+			name: "tool_choice auto",
+			req:  withTools(protocol.ToolChoiceAuto),
+			want: `{"model":"m","messages":[{"role":"user","content":"hi"}],` + toolsWire + `,"tool_choice":"auto"}`,
+		},
+		{
+			name: "tool_choice none",
+			req:  withTools(protocol.ToolChoiceNone),
+			want: `{"model":"m","messages":[{"role":"user","content":"hi"}],` + toolsWire + `,"tool_choice":"none"}`,
+		},
+		{
+			name: "tool_choice required",
+			req:  withTools(protocol.ToolChoiceRequired),
+			want: `{"model":"m","messages":[{"role":"user","content":"hi"}],` + toolsWire + `,"tool_choice":"required"}`,
+		},
+		{
+			name: "tool_choice of a named function",
+			req:  withTools(protocol.FunctionToolChoice{Name: "get_weather"}),
+			want: `{"model":"m","messages":[{"role":"user","content":"hi"}],` + toolsWire + `,
+				"tool_choice":{"type":"function","function":{"name":"get_weather"}}}`,
+		},
+		{
+			name: "tool_choice of allowed tools, auto",
+			req: withTools(protocol.AllowedToolChoice{
+				Tools: []protocol.FunctionToolChoice{{Name: "get_time"}},
+				Mode:  protocol.ToolChoiceAuto,
+			}),
+			want: `{"model":"m","messages":[{"role":"user","content":"hi"}],` + toolsWire + `,
+				"tool_choice":{"type":"allowed_tools","allowed_tools":{"mode":"auto",
+					"tools":[{"type":"function","function":{"name":"get_time"}}]}}}`,
+		},
+		{
+			name: "tool_choice of allowed tools, required",
+			req: withTools(protocol.AllowedToolChoice{
+				Tools: []protocol.FunctionToolChoice{{Name: "get_weather"}, {Name: "get_time"}},
+				Mode:  protocol.ToolChoiceRequired,
+			}),
+			want: `{"model":"m","messages":[{"role":"user","content":"hi"}],` + toolsWire + `,
+				"tool_choice":{"type":"allowed_tools","allowed_tools":{"mode":"required","tools":[
+					{"type":"function","function":{"name":"get_weather"}},
+					{"type":"function","function":{"name":"get_time"}}]}}}`,
+		},
+		{
+			name: "assistant message and its calls as one message",
+			req: &protocol.Request{Model: "m", Input: []protocol.Item{
+				text(protocol.RoleUser, "Weather and time in Paris?"),
+				assistant("Checking."),
+				protocol.FunctionCall{CallID: "c1", Name: "get_weather", Arguments: `{"city":"Paris"}`},
+				protocol.FunctionCall{ID: "fc_2", Status: protocol.StatusCompleted, CallID: "c2", Name: "get_time"},
+				protocol.FunctionCallOutput{CallID: "c1", Output: `{"celsius":21}`},
+				protocol.FunctionCallOutput{CallID: "c2", Output: "09:00"},
+			}},
+			want: `{"model":"m","messages":[
+				{"role":"user","content":"Weather and time in Paris?"},
+				{"role":"assistant","content":"Checking.","tool_calls":[
+					{"id":"c1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}},
+					{"id":"c2","type":"function","function":{"name":"get_time","arguments":"{}"}}]},
+				{"role":"tool","content":"{\"celsius\":21}","tool_call_id":"c1"},
+				{"role":"tool","content":"09:00","tool_call_id":"c2"}]}`,
+		},
+		{
+			name: "calls alone as an assistant message with no content",
+			req: &protocol.Request{Model: "m", Input: []protocol.Item{
+				text(protocol.RoleUser, "Weather in Paris?"),
+				protocol.FunctionCall{CallID: "c1", Name: "get_weather", Arguments: `{"city":"Paris"}`},
+				protocol.FunctionCallOutput{CallID: "c1", Output: `{"celsius":21}`},
+			}},
+			want: `{"model":"m","messages":[
+				{"role":"user","content":"Weather in Paris?"},
+				{"role":"assistant","tool_calls":[
+					{"id":"c1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}}]},
+				{"role":"tool","content":"{\"celsius\":21}","tool_call_id":"c1"}]}`,
+		},
+		{
+			name: "two runs separated by tool outputs",
+			req: &protocol.Request{Model: "m", Input: []protocol.Item{
+				text(protocol.RoleUser, "Weather in Paris, then Rome?"),
+				protocol.FunctionCall{CallID: "c1", Name: "get_weather", Arguments: `{"city":"Paris"}`},
+				protocol.FunctionCallOutput{CallID: "c1", Output: "21"},
+				assistant("Paris is 21. Now Rome."),
+				protocol.FunctionCall{CallID: "c2", Name: "get_weather", Arguments: `{"city":"Rome"}`},
+				protocol.FunctionCallOutput{CallID: "c2", Output: "25"},
+				protocol.FunctionCall{CallID: "c3", Name: "get_weather", Arguments: `{"city":"Oslo"}`},
+				protocol.FunctionCallOutput{CallID: "c3", Output: "9"},
+				assistant("Paris 21, Rome 25, Oslo 9."),
+			}},
+			want: `{"model":"m","messages":[
+				{"role":"user","content":"Weather in Paris, then Rome?"},
+				{"role":"assistant","tool_calls":[
+					{"id":"c1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}}]},
+				{"role":"tool","content":"21","tool_call_id":"c1"},
+				{"role":"assistant","content":"Paris is 21. Now Rome.","tool_calls":[
+					{"id":"c2","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Rome\"}"}}]},
+				{"role":"tool","content":"25","tool_call_id":"c2"},
+				{"role":"assistant","tool_calls":[
+					{"id":"c3","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Oslo\"}"}}]},
+				{"role":"tool","content":"9","tool_call_id":"c3"},
+				{"role":"assistant","content":"Paris 21, Rome 25, Oslo 9."}]}`,
+		},
+		{
+			name: "a user message closes a run",
+			req: &protocol.Request{Model: "m", Input: []protocol.Item{
+				assistant("Which city?"),
+				text(protocol.RoleUser, "Paris."),
+				protocol.FunctionCall{CallID: "c1", Name: "get_weather", Arguments: `{"city":"Paris"}`},
+			}},
+			want: `{"model":"m","messages":[
+				{"role":"assistant","content":"Which city?"},
+				{"role":"user","content":"Paris."},
+				{"role":"assistant","tool_calls":[
+					{"id":"c1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}}]}]}`,
+		},
+		{
+			name: "tool outputs: empty, and parts",
+			req: &protocol.Request{Model: "m", Input: []protocol.Item{
+				protocol.FunctionCall{CallID: "c1", Name: "ping"},
+				protocol.FunctionCall{CallID: "c2", Name: "get_weather", Arguments: `{"city":"Paris"}`},
+				protocol.FunctionCall{CallID: "c3", Name: "get_weather", Arguments: `{"city":"Rome"}`},
+				protocol.FunctionCallOutput{CallID: "c1"},
+				protocol.FunctionCallOutput{CallID: "c2", OutputParts: []protocol.ContentPart{
+					protocol.InputText{Text: "21"}, protocol.InputText{Text: "celsius"},
+				}},
+				protocol.FunctionCallOutput{CallID: "c3", OutputParts: []protocol.ContentPart{protocol.InputText{Text: "25"}}},
+			}},
+			want: `{"model":"m","messages":[
+				{"role":"assistant","tool_calls":[
+					{"id":"c1","type":"function","function":{"name":"ping","arguments":"{}"}},
+					{"id":"c2","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}},
+					{"id":"c3","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Rome\"}"}}]},
+				{"role":"tool","content":"","tool_call_id":"c1"},
+				{"role":"tool","content":[{"type":"text","text":"21"},{"type":"text","text":"celsius"}],"tool_call_id":"c2"},
+				{"role":"tool","content":"25","tool_call_id":"c3"}]}`,
+		},
+		{
 			name: "max_output_tokens as max_completion_tokens",
 			req:  &protocol.Request{Model: "m", Input: []protocol.Item{text(protocol.RoleUser, "hi")}, MaxOutputTokens: 64},
 			want: `{"model":"m","messages":[{"role":"user","content":"hi"}],"max_completion_tokens":64}`,
@@ -235,6 +402,22 @@ func TestEncodeRefusesNativeClash(t *testing.T) {
 				t.Errorf("server received %d requests, want 0", n)
 			}
 		})
+	}
+}
+
+func TestEncodeRefusesAllowedToolsModeNone(t *testing.T) {
+	srv, resp, err := generate(t, okReply, withTools(protocol.AllowedToolChoice{
+		Tools: []protocol.FunctionToolChoice{{Name: "get_time"}},
+		Mode:  protocol.ToolChoiceNone,
+	}))
+	if err == nil {
+		t.Fatalf("Generate = %v, nil; want an error", resp)
+	}
+	if want := "allowed_tools of mode none has no Chat Completions form"; !strings.Contains(err.Error(), want) {
+		t.Errorf("Generate error = %q, want it to contain %q", err, want)
+	}
+	if n := len(srv.Requests()); n != 0 {
+		t.Errorf("server received %d requests, want 0", n)
 	}
 }
 
@@ -338,6 +521,48 @@ func TestDecode(t *testing.T) {
 			},
 		},
 		{
+			name: "llama.cpp reply of tool calls, content null",
+			reply: `{"choices":[{"finish_reason":"tool_calls","index":0,"message":{"role":"assistant",
+				"content":null,"reasoning_content":"Need the weather.","tool_calls":[
+					{"type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"},"id":"c1"},
+					{"type":"function","function":{"name":"get_time","arguments":"{}"},"id":"c2"}]}}]}`,
+			want: &protocol.Response{
+				Output: []protocol.Item{
+					protocol.FunctionCall{Status: protocol.StatusCompleted, CallID: "c1", Name: "get_weather", Arguments: `{"city":"Paris"}`},
+					protocol.FunctionCall{Status: protocol.StatusCompleted, CallID: "c2", Name: "get_time", Arguments: "{}"},
+				},
+				Status: protocol.StatusCompleted,
+			},
+		},
+		{
+			name: "message before its tool calls",
+			reply: `{"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","content":"Checking.",
+				"tool_calls":[{"id":"c1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}}]}}]}`,
+			want: &protocol.Response{
+				Output: []protocol.Item{
+					protocol.Message{
+						Status:  protocol.StatusCompleted,
+						Role:    protocol.RoleAssistant,
+						Content: []protocol.ContentPart{protocol.OutputText{Text: "Checking."}},
+					},
+					protocol.FunctionCall{Status: protocol.StatusCompleted, CallID: "c1", Name: "get_weather", Arguments: `{"city":"Paris"}`},
+				},
+				Status: protocol.StatusCompleted,
+			},
+		},
+		{
+			name: "tool call cut off at the bound",
+			reply: `{"choices":[{"finish_reason":"length","message":{"role":"assistant",
+				"tool_calls":[{"id":"c1","type":"function","function":{"name":"get_weather","arguments":"{\"ci"}}]}}]}`,
+			want: &protocol.Response{
+				Output: []protocol.Item{
+					protocol.FunctionCall{Status: protocol.StatusIncomplete, CallID: "c1", Name: "get_weather", Arguments: `{"ci`},
+				},
+				Status:            protocol.StatusIncomplete,
+				IncompleteDetails: &protocol.IncompleteDetails{Reason: protocol.ReasonMaxOutputTokens},
+			},
+		},
+		{
 			name: "first choice only",
 			reply: `{"choices":[{"message":{"content":"one"},"finish_reason":"stop"},
 				{"message":{"content":"two"},"finish_reason":"length"}]}`,
@@ -373,6 +598,9 @@ func TestDecodeRefusesReply(t *testing.T) {
 		{"unknown finish_reason", `{"choices":[{"message":{"content":"x"},"finish_reason":"function_call"}]}`, `unknown finish_reason "function_call"`},
 		{"missing finish_reason", `{"choices":[{"message":{"content":"x"}}]}`, `unknown finish_reason ""`},
 		{"no choices", `{"choices":[]}`, "no choices"},
+		{"tool call of unknown type", `{"choices":[{"finish_reason":"tool_calls","message":{"tool_calls":[
+			{"id":"c1","type":"function","function":{"name":"f","arguments":"{}"}},
+			{"id":"c2","type":"custom","custom":{"name":"g","input":"x"}}]}}]}`, `tool call 1 has unknown type "custom"`},
 		{"not JSON", `Paris`, "decode response"},
 	}
 	for _, tc := range cases {

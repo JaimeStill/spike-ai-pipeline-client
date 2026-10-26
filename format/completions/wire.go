@@ -6,6 +6,10 @@ import "encoding/json/jsontext"
 type request struct {
 	Model    string    `json:"model"`
 	Messages []message `json:"messages"`
+	Tools    []tool    `json:"tools,omitzero"`
+	// ToolChoice is "auto", "none", "required", or a namedToolChoice or allowedToolsChoice
+	// object.
+	ToolChoice jsontext.Value `json:"tool_choice,omitzero"`
 	// MaxCompletionTokens carries max_output_tokens. llama.cpp b11669 reads it and max_tokens
 	// alike, as aliases of n_predict; max_completion_tokens is the name OpenAI keeps, having
 	// deprecated max_tokens.
@@ -16,10 +20,67 @@ type request struct {
 }
 
 // message is a Chat Completions message. Content is a string when the message is a single text
-// part, and an array of parts otherwise.
+// part, and an array of parts otherwise; an assistant message of tool calls alone omits it.
+// ToolCalls are an assistant message's calls, and ToolCallID names the call a tool message
+// answers.
 type message struct {
-	Role    string         `json:"role"`
-	Content jsontext.Value `json:"content"`
+	Role       string         `json:"role"`
+	Content    jsontext.Value `json:"content,omitzero"`
+	ToolCalls  []toolCall     `json:"tool_calls,omitzero"`
+	ToolCallID string         `json:"tool_call_id,omitzero"`
+}
+
+// tool is a Chat Completions tool, always a function.
+type tool struct {
+	Type     string       `json:"type"`
+	Function functionTool `json:"function"`
+}
+
+// functionTool is a tool's function: its name, and its description, parameters, and strict
+// flag, each omitted when unset.
+type functionTool struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitzero"`
+	Parameters  jsontext.Value `json:"parameters,omitzero"`
+	Strict      bool           `json:"strict,omitzero"`
+}
+
+// toolCall is a Chat Completions tool call, always a function's, in an assistant message of a
+// request or a reply.
+type toolCall struct {
+	ID       string       `json:"id"`
+	Type     string       `json:"type"`
+	Function functionCall `json:"function"`
+}
+
+// functionCall is a tool call's function: its name and its arguments as JSON text.
+type functionCall struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
+// namedToolChoice is a tool_choice that has the model call one function.
+type namedToolChoice struct {
+	Type     string       `json:"type"`
+	Function functionName `json:"function"`
+}
+
+// functionName names a function in a tool choice.
+type functionName struct {
+	Name string `json:"name"`
+}
+
+// allowedToolsChoice is a tool_choice that narrows the tools to a set.
+type allowedToolsChoice struct {
+	Type         string       `json:"type"`
+	AllowedTools allowedTools `json:"allowed_tools"`
+}
+
+// allowedTools is an allowed_tools choice's set: its mode, auto or required, and its tools,
+// each a namedToolChoice.
+type allowedTools struct {
+	Mode  string            `json:"mode"`
+	Tools []namedToolChoice `json:"tools"`
 }
 
 // textPart is a Chat Completions text content part.
@@ -64,8 +125,9 @@ type refusalPart struct {
 type response struct {
 	Choices []struct {
 		Message struct {
-			Content string `json:"content"`
-			Refusal string `json:"refusal"`
+			Content   string     `json:"content"`
+			Refusal   string     `json:"refusal"`
+			ToolCalls []toolCall `json:"tool_calls"`
 		} `json:"message"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`

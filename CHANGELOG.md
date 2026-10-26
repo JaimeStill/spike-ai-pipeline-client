@@ -31,5 +31,16 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
   `spike-ai-pipeline:input_audio`, extending spec 2026-04-24 until the spec adds an audio input
   part; the protocol package's documentation lists it. Chat Completions sends it as an
   `input_audio` part, the clip in base64.
+- Function tools: `Request.Tools` of `protocol.FunctionTool` (name, description, JSON Schema
+  parameters, strict), and `Request.ToolChoice`, a closed `protocol.ToolChoice` of a
+  `ToolChoiceMode` (auto, none, required), a `FunctionToolChoice` naming one function, or an
+  `AllowedToolChoice` narrowing the tools to a set with a mode; nil leaves the choice to the
+  endpoint. The items `protocol.FunctionCall` (call id, name, JSON arguments) and
+  `protocol.FunctionCallOutput` (call id, and a string or input_text parts) carry calls and their
+  results, and `Request.Validate` holds them to the spec's rules. Chat Completions sends tools
+  and `tool_choice` in its own forms, folds an assistant message and the calls after it into one
+  assistant message with `tool_calls`, sends a call's output as a `tool` message, and decodes a
+  reply's `tool_calls` into function_call items after its message. An `allowed_tools` choice of
+  mode none has no Chat Completions form and is refused.
 
 [Unreleased]: https://github.com/JaimeStill/spike-ai-pipeline-client/commits/main

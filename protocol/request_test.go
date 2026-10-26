@@ -24,6 +24,12 @@ func TestValidateAccepts(t *testing.T) {
 		edit(r)
 		return r
 	}
+	withChoice := func(tc protocol.ToolChoice) *protocol.Request {
+		return with(func(r *protocol.Request) {
+			r.Tools = []protocol.FunctionTool{{Name: "get_weather"}, {Name: "get_time"}}
+			r.ToolChoice = tc
+		})
+	}
 	cases := []struct {
 		name string
 		req  *protocol.Request
@@ -52,6 +58,38 @@ func TestValidateAccepts(t *testing.T) {
 				protocol.InputAudio{Data: []byte("RIFF"), Format: protocol.AudioFormatWAV},
 				protocol.InputAudio{Data: []byte("ID3"), Format: protocol.AudioFormatMP3},
 			}}}
+		})},
+		{"function call and output", with(func(r *protocol.Request) {
+			r.Input = append(r.Input,
+				protocol.FunctionCall{CallID: "c1", Name: "get_weather", Arguments: `{"city":"Paris"}`},
+				protocol.FunctionCall{CallID: "c2", Name: "get_time"},
+				protocol.FunctionCallOutput{CallID: "c1", Output: `{"celsius":21}`},
+				protocol.FunctionCallOutput{CallID: "c2"},
+				protocol.FunctionCallOutput{CallID: "c3", OutputParts: []protocol.ContentPart{
+					protocol.InputText{Text: "21"}, protocol.InputText{Text: "celsius"},
+				}},
+			)
+		})},
+		{"tools", with(func(r *protocol.Request) {
+			r.Tools = []protocol.FunctionTool{
+				{Name: "get_weather", Description: "d", Parameters: []byte(`{"type":"object"}`), Strict: true},
+				{Name: "Get-Time_2"},
+			}
+		})},
+		{"tool choice auto", withChoice(protocol.ToolChoiceAuto)},
+		{"tool choice none", withChoice(protocol.ToolChoiceNone)},
+		{"tool choice required", withChoice(protocol.ToolChoiceRequired)},
+		{"tool choice of a named function", withChoice(protocol.FunctionToolChoice{Name: "get_weather"})},
+		{"tool choice of allowed tools", withChoice(protocol.AllowedToolChoice{
+			Tools: []protocol.FunctionToolChoice{{Name: "get_weather"}, {Name: "get_time"}},
+			Mode:  protocol.ToolChoiceRequired,
+		})},
+		{"tool choice of allowed tools, mode none", withChoice(protocol.AllowedToolChoice{
+			Tools: []protocol.FunctionToolChoice{{Name: "get_time"}},
+			Mode:  protocol.ToolChoiceNone,
+		})},
+		{"tool name of 64 characters", with(func(r *protocol.Request) {
+			r.Tools = []protocol.FunctionTool{{Name: strings.Repeat("a", 64)}}
 		})},
 	}
 	for _, tc := range cases {
@@ -139,6 +177,90 @@ func TestValidateRefuses(t *testing.T) {
 		{"pointer image", with(func(r *protocol.Request) {
 			r.Input = []protocol.Item{user(&protocol.InputImage{ImageURL: "https://example.com/a.png"})}
 		}), "unsupported part *protocol.InputImage"},
+		{"function call with no call id", with(func(r *protocol.Request) {
+			r.Input = []protocol.Item{protocol.FunctionCall{Name: "f"}}
+		}), "input 0: function_call has no call id"},
+		{"function call with no name", with(func(r *protocol.Request) {
+			r.Input = []protocol.Item{protocol.FunctionCall{CallID: "c1"}}
+		}), "function_call c1 has no name"},
+		{"function call with arguments that aren't JSON", with(func(r *protocol.Request) {
+			r.Input = []protocol.Item{protocol.FunctionCall{CallID: "c1", Name: "f", Arguments: `{"city":`}}
+		}), "function_call c1 has arguments that aren't JSON"},
+		{"pointer function call", with(func(r *protocol.Request) {
+			r.Input = []protocol.Item{&protocol.FunctionCall{CallID: "c1", Name: "f"}}
+		}), "unsupported item *protocol.FunctionCall"},
+		{"function call output with no call id", with(func(r *protocol.Request) {
+			r.Input = []protocol.Item{protocol.FunctionCallOutput{Output: "21"}}
+		}), "function_call_output has no call id"},
+		{"function call output with both forms", with(func(r *protocol.Request) {
+			r.Input = []protocol.Item{protocol.FunctionCallOutput{
+				CallID: "c1", Output: "21", OutputParts: []protocol.ContentPart{protocol.InputText{Text: "21"}},
+			}}
+		}), "function_call_output c1 has both an output string and output parts"},
+		{"function call output with an output_text part", with(func(r *protocol.Request) {
+			r.Input = []protocol.Item{protocol.FunctionCallOutput{
+				CallID: "c1", OutputParts: []protocol.ContentPart{protocol.OutputText{Text: "21"}},
+			}}
+		}), "function_call_output c1 part 0: unsupported part protocol.OutputText"},
+		{"function call output with an image part", with(func(r *protocol.Request) {
+			r.Input = []protocol.Item{protocol.FunctionCallOutput{
+				CallID: "c1", OutputParts: []protocol.ContentPart{protocol.InputText{Text: "see"}, image},
+			}}
+		}), "function_call_output c1 part 1: unsupported part protocol.InputImage"},
+		{"tool with no name", with(func(r *protocol.Request) {
+			r.Tools = []protocol.FunctionTool{{Name: "f"}, {Description: "d"}}
+		}), "tool 1: tool has no name"},
+		{"tool name with a space", with(func(r *protocol.Request) {
+			r.Tools = []protocol.FunctionTool{{Name: "get weather"}}
+		}), `tool name "get weather" isn't`},
+		{"tool name of 65 characters", with(func(r *protocol.Request) {
+			r.Tools = []protocol.FunctionTool{{Name: strings.Repeat("a", 65)}}
+		}), "isn't 1 to 64"},
+		{"tool name twice", with(func(r *protocol.Request) {
+			r.Tools = []protocol.FunctionTool{{Name: "f"}, {Name: "g"}, {Name: "f"}}
+		}), `tool 2: tool name "f" is declared twice`},
+		{"tool parameters an array", with(func(r *protocol.Request) {
+			r.Tools = []protocol.FunctionTool{{Name: "f", Parameters: []byte(`[]`)}}
+		}), "tool f's parameters aren't a JSON object"},
+		{"tool parameters invalid", with(func(r *protocol.Request) {
+			r.Tools = []protocol.FunctionTool{{Name: "f", Parameters: []byte(`{"type":`)}}
+		}), "tool f's parameters aren't a JSON object"},
+		{"tool choice of unknown mode", with(func(r *protocol.Request) {
+			r.ToolChoice = protocol.ToolChoiceMode("any")
+		}), `tool choice: unknown mode "any"`},
+		{"tool choice of empty mode", with(func(r *protocol.Request) {
+			r.ToolChoice = protocol.ToolChoiceMode("")
+		}), `tool choice: unknown mode ""`},
+		{"named function undeclared", with(func(r *protocol.Request) {
+			r.Tools = []protocol.FunctionTool{{Name: "f"}}
+			r.ToolChoice = protocol.FunctionToolChoice{Name: "g"}
+		}), `tool choice: function "g" isn't one of the request's tools`},
+		{"named function with no tools", with(func(r *protocol.Request) {
+			r.ToolChoice = protocol.FunctionToolChoice{Name: "f"}
+		}), `function "f" isn't one of the request's tools`},
+		{"allowed tool undeclared", with(func(r *protocol.Request) {
+			r.Tools = []protocol.FunctionTool{{Name: "f"}}
+			r.ToolChoice = protocol.AllowedToolChoice{
+				Tools: []protocol.FunctionToolChoice{{Name: "f"}, {Name: "g"}},
+				Mode:  protocol.ToolChoiceAuto,
+			}
+		}), `allowed_tools tool 1: function "g" isn't one of the request's tools`},
+		{"allowed tools empty", with(func(r *protocol.Request) {
+			r.Tools = []protocol.FunctionTool{{Name: "f"}}
+			r.ToolChoice = protocol.AllowedToolChoice{Mode: protocol.ToolChoiceAuto}
+		}), "allowed_tools has no tools"},
+		{"allowed tools with no mode", with(func(r *protocol.Request) {
+			r.Tools = []protocol.FunctionTool{{Name: "f"}}
+			r.ToolChoice = protocol.AllowedToolChoice{Tools: []protocol.FunctionToolChoice{{Name: "f"}}}
+		}), `allowed_tools: unknown mode ""`},
+		{"allowed tools of unknown mode", with(func(r *protocol.Request) {
+			r.Tools = []protocol.FunctionTool{{Name: "f"}}
+			r.ToolChoice = protocol.AllowedToolChoice{Tools: []protocol.FunctionToolChoice{{Name: "f"}}, Mode: "any"}
+		}), `allowed_tools: unknown mode "any"`},
+		{"pointer tool choice", with(func(r *protocol.Request) {
+			r.Tools = []protocol.FunctionTool{{Name: "f"}}
+			r.ToolChoice = &protocol.FunctionToolChoice{Name: "f"}
+		}), "unsupported tool choice *protocol.FunctionToolChoice"},
 		{"negative max output tokens", with(func(r *protocol.Request) { r.MaxOutputTokens = -1 }), "negative"},
 		{"native array", with(func(r *protocol.Request) { r.Native = []byte(`[1]`) }), "native field"},
 		{"native invalid", with(func(r *protocol.Request) { r.Native = []byte(`{"a":`) }), "native field"},

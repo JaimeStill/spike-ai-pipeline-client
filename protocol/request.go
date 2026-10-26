@@ -15,6 +15,10 @@ type Request struct {
 	Instructions string
 	// Input is the conversation so far, oldest item first. It holds at least one item.
 	Input []Item
+	// Tools are the functions the model may call.
+	Tools []FunctionTool
+	// ToolChoice controls which of Tools the model calls. Nil leaves it to the endpoint.
+	ToolChoice ToolChoice
 	// MaxOutputTokens bounds the tokens the model generates, reasoning included. Zero leaves
 	// the bound to the endpoint.
 	MaxOutputTokens int
@@ -31,7 +35,12 @@ type Request struct {
 // refuses nil, no model, no input, an item or content part that isn't one of this package's by
 // value (a *Message is refused), a message with an unknown role or no content, a part its role
 // doesn't take, an image with no URL or an unknown detail, an audio clip with no data or an
-// unknown format, a negative MaxOutputTokens, and a Native that isn't a JSON object with unique
+// unknown format, a function_call with no call id or name or with arguments that aren't JSON, a
+// function_call_output with no call id, both output forms, or a part other than InputText, a
+// tool with no name, a name the spec doesn't allow, or a name another tool has, parameters that
+// aren't a JSON object, a tool choice that isn't one of this package's by value, an unknown
+// mode, a named function or allowed tool the request doesn't declare, an allowed_tools choice
+// with no tools, a negative MaxOutputTokens, and a Native that isn't a JSON object with unique
 // member names.
 func (r *Request) Validate() error {
 	if err := r.validate(); err != nil {
@@ -57,18 +66,34 @@ func (r *Request) validate() error {
 			return fmt.Errorf("input %d: %w", i, err)
 		}
 	}
+	declared := make(map[string]bool, len(r.Tools))
+	for i, t := range r.Tools {
+		if err := validateTool(t, declared); err != nil {
+			return fmt.Errorf("tool %d: %w", i, err)
+		}
+		declared[t.Name] = true
+	}
+	if r.ToolChoice != nil {
+		if err := validateToolChoice(r.ToolChoice, declared); err != nil {
+			return fmt.Errorf("tool choice: %w", err)
+		}
+	}
 	if len(r.Native) > 0 && (r.Native.Kind() != jsontext.KindBeginObject || !r.Native.IsValid()) {
 		return errors.New("request's native field isn't a JSON object with unique member names")
 	}
 	return nil
 }
 
-// validateItem refuses an item that isn't one of the package's by value, and a message whose
-// role or content the model doesn't allow.
+// validateItem refuses an item that isn't one of the package's by value, and one the model
+// doesn't allow.
 func validateItem(it Item) error {
 	switch it := it.(type) {
 	case Message:
 		return validateMessage(it)
+	case FunctionCall:
+		return validateFunctionCall(it)
+	case FunctionCallOutput:
+		return validateFunctionCallOutput(it)
 	default:
 		return fmt.Errorf("unsupported item %T", it)
 	}
@@ -140,4 +165,111 @@ func validateAudio(p InputAudio) error {
 		return nil
 	}
 	return fmt.Errorf("audio has unknown format %q", p.Format)
+}
+
+// validateFunctionCall refuses a call with no call id or name, or with arguments that aren't
+// JSON.
+func validateFunctionCall(c FunctionCall) error {
+	switch {
+	case c.CallID == "":
+		return errors.New("function_call has no call id")
+	case c.Name == "":
+		return fmt.Errorf("function_call %s has no name", c.CallID)
+	case c.Arguments != "" && !jsontext.Value(c.Arguments).IsValid():
+		return fmt.Errorf("function_call %s has arguments that aren't JSON", c.CallID)
+	}
+	return nil
+}
+
+// validateFunctionCallOutput refuses an output with no call id, with both a string and parts,
+// or with a part the spec doesn't take there. Of the spec's output parts, the stateless subset
+// covers input_text.
+func validateFunctionCallOutput(o FunctionCallOutput) error {
+	switch {
+	case o.CallID == "":
+		return errors.New("function_call_output has no call id")
+	case o.Output != "" && len(o.OutputParts) > 0:
+		return fmt.Errorf("function_call_output %s has both an output string and output parts", o.CallID)
+	}
+	for i, p := range o.OutputParts {
+		if _, ok := p.(InputText); !ok {
+			return fmt.Errorf("function_call_output %s part %d: unsupported part %T", o.CallID, i, p)
+		}
+	}
+	return nil
+}
+
+// validateTool refuses a tool whose name is missing, outside the spec's pattern, or among
+// declared, the names of the tools before it, and parameters that aren't a JSON object.
+func validateTool(t FunctionTool, declared map[string]bool) error {
+	switch {
+	case t.Name == "":
+		return errors.New("tool has no name")
+	case !validToolName(t.Name):
+		return fmt.Errorf("tool name %q isn't 1 to 64 letters, digits, underscores, and hyphens", t.Name)
+	case declared[t.Name]:
+		return fmt.Errorf("tool name %q is declared twice", t.Name)
+	case len(t.Parameters) > 0 && (t.Parameters.Kind() != jsontext.KindBeginObject || !t.Parameters.IsValid()):
+		return fmt.Errorf("tool %s's parameters aren't a JSON object with unique member names", t.Name)
+	}
+	return nil
+}
+
+// validToolName reports whether name matches the spec's pattern for a function's name,
+// ^[a-zA-Z0-9_-]+$, at most 64 characters long.
+func validToolName(name string) bool {
+	if len(name) > 64 {
+		return false
+	}
+	for _, c := range []byte(name) {
+		switch {
+		case 'a' <= c && c <= 'z', 'A' <= c && c <= 'Z', '0' <= c && c <= '9', c == '_', c == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// validateToolChoice refuses a choice that isn't one of the package's by value, an unknown
+// mode, a function declared doesn't name, and an allowed_tools choice with no tools.
+func validateToolChoice(tc ToolChoice, declared map[string]bool) error {
+	switch tc := tc.(type) {
+	case ToolChoiceMode:
+		return validateToolChoiceMode(tc)
+	case FunctionToolChoice:
+		return validateFunctionToolChoice(tc, declared)
+	case AllowedToolChoice:
+		if len(tc.Tools) == 0 {
+			return errors.New("allowed_tools has no tools")
+		}
+		for i, f := range tc.Tools {
+			if err := validateFunctionToolChoice(f, declared); err != nil {
+				return fmt.Errorf("allowed_tools tool %d: %w", i, err)
+			}
+		}
+		if err := validateToolChoiceMode(tc.Mode); err != nil {
+			return fmt.Errorf("allowed_tools: %w", err)
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported tool choice %T", tc)
+	}
+}
+
+// validateToolChoiceMode refuses a mode other than auto, none, and required.
+func validateToolChoiceMode(m ToolChoiceMode) error {
+	switch m {
+	case ToolChoiceAuto, ToolChoiceNone, ToolChoiceRequired:
+		return nil
+	}
+	return fmt.Errorf("unknown mode %q", m)
+}
+
+// validateFunctionToolChoice refuses a function declared doesn't name.
+func validateFunctionToolChoice(f FunctionToolChoice, declared map[string]bool) error {
+	if !declared[f.Name] {
+		return fmt.Errorf("function %q isn't one of the request's tools", f.Name)
+	}
+	return nil
 }
