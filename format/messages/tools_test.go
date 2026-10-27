@@ -177,14 +177,14 @@ func TestReasoningRoundTrip(t *testing.T) {
 	}
 	input := []protocol.Item{text(protocol.RoleUser, "What is the weather in Paris right now?")}
 	input = append(input, resp.Output...)
-	input = append(input, output("tF5fMHb3Wb9oLGnjuubi2GFSlR6QPCmG", `{"city":"Paris","celsius":17}`))
+	input = append(input, output("jtjN1bIEUcKA2FZ8Xhn4jIZYGKx2H2Cf", `{"city":"Paris","celsius":17}`))
 	assertJSON(t, encode(t, ask(input...)), `{"model":"m","max_tokens":64,"stream":false,"messages":[
 		{"role":"user","content":[{"type":"text","text":"What is the weather in Paris right now?"}]},
 		{"role":"assistant","content":[
-			{"type":"thinking","thinking":"User asks current weather in Paris. Use function get_weather.","signature":""},
-			{"type":"tool_use","id":"tF5fMHb3Wb9oLGnjuubi2GFSlR6QPCmG","name":"get_weather","input":{"city":"Paris"}}]},
+			{"type":"thinking","thinking":`+quote(toolUseThinking)+`,"signature":""},
+			{"type":"tool_use","id":"jtjN1bIEUcKA2FZ8Xhn4jIZYGKx2H2Cf","name":"get_weather","input":{"city":"Paris"}}]},
 		{"role":"user","content":[
-			{"type":"tool_result","tool_use_id":"tF5fMHb3Wb9oLGnjuubi2GFSlR6QPCmG","content":"{\"city\":\"Paris\",\"celsius\":17}"}]}]}`)
+			{"type":"tool_result","tool_use_id":"jtjN1bIEUcKA2FZ8Xhn4jIZYGKx2H2Cf","content":"{\"city\":\"Paris\",\"celsius\":17}"}]}]}`)
 }
 
 // TestRedactedRoundTrip decodes a redacted_thinking block and sends it back, its data unchanged.

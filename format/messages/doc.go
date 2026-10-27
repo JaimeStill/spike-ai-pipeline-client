@@ -4,6 +4,11 @@
 // targets Anthropic's API and the endpoints compatible with it, such as llama.cpp's router. A
 // caller builds it with New at the composition root, as client.Config's Format.
 //
+// A streamed reply's content blocks may be open at once, as llama.cpp's router stops every block
+// only at the end of the reply; the decoder closes each part at its own block's stop. An error
+// frame in the stream, Anthropic's {"type":"error",...} or llama.cpp's {"code","message","type"},
+// ends it with the error event and response.failed.
+//
 // Reasoning goes back through a reasoning item's encrypted_content, where DecodeResponse writes
 // the format's envelope, spike-ai-pipeline:messages/v1: and base64 of the thinking block's
 // {"thinking","signature"} or the redacted_thinking block's {"data"}; another format's envelope
@@ -30,7 +35,8 @@
 //     reasoning effort, text format, and the native tier.
 //   - [Format.DecodeResponse] decodes a Messages reply into a response: reasoning, messages, and
 //     function calls.
-//   - [Format.EncodeStreamRequest] refuses every request: the format doesn't stream yet.
-//   - [Format.NewStreamDecoder] returns a decoder that refuses every event, for the same reason.
+//   - [Format.EncodeStreamRequest] encodes a request as EncodeRequest does, with stream true.
+//   - [Format.NewStreamDecoder] returns a decoder of one streamed reply's events into the
+//     protocol's streaming events, whose folded Response is DecodeResponse's for the same reply.
 //   - [Format.DecodeError] decodes an Anthropic or an OpenAI-style error body.
 package messages

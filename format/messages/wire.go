@@ -179,3 +179,33 @@ type envelope struct {
 	// Data is a redacted_thinking block's opaque data.
 	Data *string `json:"data,omitzero"`
 }
+
+// streamEvent is the part of a streamed reply's event the format reads: its type, and the
+// members of the event types it reads. Message is message_start's message, an object, or the
+// string message of an error frame such as llama.cpp's.
+type streamEvent struct {
+	Type         string         `json:"type"`
+	Message      jsontext.Value `json:"message"`
+	Index        int            `json:"index"`
+	ContentBlock block          `json:"content_block"`
+	Delta        streamDelta    `json:"delta"`
+	Usage        usage          `json:"usage"`
+}
+
+// streamMessage is the part of message_start's message the format reads: the reply's id and its
+// usage, whose input counts the terminal Response takes.
+type streamMessage struct {
+	ID    string `json:"id"`
+	Usage usage  `json:"usage"`
+}
+
+// streamDelta is a content_block_delta's delta, of a type and the member that type carries, or
+// message_delta's, of the stop_reason.
+type streamDelta struct {
+	Type        string `json:"type"`
+	Text        string `json:"text"`
+	Thinking    string `json:"thinking"`
+	Signature   string `json:"signature"`
+	PartialJSON string `json:"partial_json"`
+	StopReason  string `json:"stop_reason"`
+}

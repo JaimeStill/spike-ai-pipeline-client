@@ -3,7 +3,6 @@ package messages
 import (
 	"encoding/base64"
 	"encoding/json/v2"
-	"errors"
 	"fmt"
 	"strconv"
 
@@ -187,26 +186,4 @@ func decodeStop(reason string) (protocol.Status, *protocol.IncompleteDetails, bo
 // gives no code, and its top-level type, always "error", isn't the error's.
 func (*Format) DecodeError(body []byte) (message, typ, code string) {
 	return format.DecodeOpenAIError(body)
-}
-
-// NewStreamDecoder returns a decoder that refuses every event: the format doesn't stream yet,
-// and EncodeStreamRequest refuses every request, so the client never reaches it.
-func (*Format) NewStreamDecoder() format.StreamDecoder {
-	return unsupportedStream{}
-}
-
-// unsupportedStream is the decoder NewStreamDecoder returns, which refuses every event.
-type unsupportedStream struct{}
-
-// errNoStreaming is the error every unsupportedStream method returns.
-var errNoStreaming = errors.New("messages: streaming is not yet supported")
-
-// Decode refuses data.
-func (unsupportedStream) Decode([]byte) ([]protocol.Event, error) {
-	return nil, errNoStreaming
-}
-
-// End refuses to end the stream.
-func (unsupportedStream) End() ([]protocol.Event, error) {
-	return nil, errNoStreaming
 }

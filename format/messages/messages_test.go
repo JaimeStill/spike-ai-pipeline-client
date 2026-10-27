@@ -250,15 +250,11 @@ func TestEncodeRefuses(t *testing.T) {
 	}
 }
 
-func TestEncodeStreamRequestRefuses(t *testing.T) {
-	body, err := messages.New().EncodeStreamRequest(ask(text(protocol.RoleUser, "hi")), make(http.Header))
-	if err == nil || !strings.Contains(err.Error(), "streaming is not yet supported") {
-		t.Errorf("EncodeStreamRequest = %s, %v; want streaming refused", body, err)
-	}
-}
-
 // textThinking is the thinking text of the reply recorded in testdata/text.json.
 const textThinking = `The user asks: "Name three French cities, comma-separated, nothing else." The developer says: "Answer with the names alone." So we should output three French city names, separated by commas, no extra text. So something like "Paris, Lyon, Marseille". Ensure no extra punctuation beyond commas. Probably just "Paris, Lyon, Marseille".`
+
+// toolUseThinking is the thinking text of the reply recorded in testdata/tool_use.json.
+const toolUseThinking = `The user asks: "What is the weather in Paris right now?" We need to get current temperature in Paris. Use function get_weather with city "Paris".`
 
 // quote returns s as a JSON string.
 func quote(s string) string {
@@ -303,24 +299,24 @@ func TestDecodeRecorded(t *testing.T) {
 			want: &protocol.Response{
 				Output: []protocol.Item{
 					protocol.Reasoning{
-						ID:      "chatcmpl-bKMb87W7SycL38XdQ1eG0n88hQUe9ctP/0",
+						ID:      "chatcmpl-FtWUtroPbbUwM5wedxWLbnuDkCXabSyo/0",
 						Status:  protocol.StatusCompleted,
-						Content: []protocol.ReasoningText{{Text: "User asks current weather in Paris. Use function get_weather."}},
+						Content: []protocol.ReasoningText{{Text: toolUseThinking}},
 						// The envelope's literal, pinned: base64 of
-						// {"thinking":"User asks current weather in Paris. Use function get_weather.","signature":""}.
+						// {"thinking":<toolUseThinking>,"signature":""}.
 						EncryptedContent: "spike-ai-pipeline:messages/v1:" +
-							"eyJ0aGlua2luZyI6IlVzZXIgYXNrcyBjdXJyZW50IHdlYXRoZXIgaW4gUGFyaXMuIFVzZSBmdW5jdGlvbiBnZXRfd2VhdGhlci4iLCJzaWduYXR1cmUiOiIifQ==",
+							"eyJ0aGlua2luZyI6IlRoZSB1c2VyIGFza3M6IFwiV2hhdCBpcyB0aGUgd2VhdGhlciBpbiBQYXJpcyByaWdodCBub3c/XCIgV2UgbmVlZCB0byBnZXQgY3VycmVudCB0ZW1wZXJhdHVyZSBpbiBQYXJpcy4gVXNlIGZ1bmN0aW9uIGdldF93ZWF0aGVyIHdpdGggY2l0eSBcIlBhcmlzXCIuIiwic2lnbmF0dXJlIjoiIn0=",
 					},
 					protocol.FunctionCall{
-						ID:        "chatcmpl-bKMb87W7SycL38XdQ1eG0n88hQUe9ctP/1",
+						ID:        "chatcmpl-FtWUtroPbbUwM5wedxWLbnuDkCXabSyo/1",
 						Status:    protocol.StatusCompleted,
-						CallID:    "tF5fMHb3Wb9oLGnjuubi2GFSlR6QPCmG",
+						CallID:    "jtjN1bIEUcKA2FZ8Xhn4jIZYGKx2H2Cf",
 						Name:      "get_weather",
 						Arguments: `{"city":"Paris"}`,
 					},
 				},
 				Status: protocol.StatusCompleted,
-				Usage:  protocol.Usage{InputTokens: 138, OutputTokens: 40, TotalTokens: 178},
+				Usage:  protocol.Usage{InputTokens: 134, OutputTokens: 60, TotalTokens: 194},
 			},
 		},
 		{
@@ -573,15 +569,5 @@ func TestDecodeError(t *testing.T) {
 					message, typ, code, tc.message, tc.typ, tc.code)
 			}
 		})
-	}
-}
-
-func TestStreamDecoderRefuses(t *testing.T) {
-	d := messages.New().NewStreamDecoder()
-	if _, err := d.Decode([]byte(`{"type":"message_start"}`)); err == nil {
-		t.Error("Decode = nil error, want streaming refused")
-	}
-	if _, err := d.End(); err == nil {
-		t.Error("End = nil error, want streaming refused")
 	}
 }

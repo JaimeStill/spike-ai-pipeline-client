@@ -74,12 +74,28 @@ import (
 // The hints Messages has no form for are dropped, never refused: an image's detail; text's
 // verbosity; and a JSON-schema format's name, description, and strict flag.
 //
-// The request is unstreamed, sent with stream false. Native's members, the native tier, are
+// The request is unstreamed, sent with stream false; EncodeStreamRequest streams it. Native's
+// members, the native tier, are
 // merged into the top level, and a member named like one the typed fields set is refused, as is
 // stream, which is always set. The header is set only once the body is encoded, so a refused
 // request adds none.
 func (*Format) EncodeRequest(req *protocol.Request, header http.Header) ([]byte, error) {
-	b, err := encodeRequest(req)
+	return encode(req, false, header)
+}
+
+// EncodeStreamRequest encodes req as EncodeRequest does, as a streamed request: with stream
+// true, which asks for the reply as server-sent events. It refuses what EncodeRequest refuses,
+// a request with no MaxOutputTokens among them, and a Native stream member, which clashes with
+// the stream member the body always sets. It sets the anthropic-version header as EncodeRequest
+// does.
+func (*Format) EncodeStreamRequest(req *protocol.Request, header http.Header) ([]byte, error) {
+	return encode(req, true, header)
+}
+
+// encode encodes req, streamed when stream is set, and sets the anthropic-version header once
+// the body is encoded, so a refused request adds none.
+func encode(req *protocol.Request, stream bool, header http.Header) ([]byte, error) {
+	b, err := encodeRequest(req, stream)
 	if err != nil {
 		return nil, fmt.Errorf("messages: %w", err)
 	}
@@ -87,13 +103,8 @@ func (*Format) EncodeRequest(req *protocol.Request, header http.Header) ([]byte,
 	return b, nil
 }
 
-// EncodeStreamRequest refuses every request: the format doesn't stream yet. It adds no headers.
-func (*Format) EncodeStreamRequest(*protocol.Request, http.Header) ([]byte, error) {
-	return nil, errNoStreaming
-}
-
-// encodeRequest encodes req as EncodeRequest describes.
-func encodeRequest(req *protocol.Request) ([]byte, error) {
+// encodeRequest encodes req as EncodeRequest describes, streamed when stream is set.
+func encodeRequest(req *protocol.Request, stream bool) ([]byte, error) {
 	if req.MaxOutputTokens == 0 {
 		return nil, errors.New("request has no max output tokens, which Messages requires as max_tokens")
 	}
@@ -102,6 +113,7 @@ func encodeRequest(req *protocol.Request) ([]byte, error) {
 		Model:     req.Model,
 		MaxTokens: req.MaxOutputTokens,
 		System:    req.Instructions,
+		Stream:    stream,
 		Native:    req.Native,
 	}
 	if body.Messages, err = encodeInput(req.Input); err != nil {
