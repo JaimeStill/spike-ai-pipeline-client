@@ -21,12 +21,22 @@ import (
 //
 // Each pair holds an event or an error, never both. The events run from
 // protocol.ResponseCreated to one terminal event, after which the sequence ends. An error ends
-// the sequence as its last pair:
+// the sequence as its last pair, and no event follows it; the events before it fold, in a
+// protocol.Accumulator, to the partial Response, in protocol.StatusInProgress:
 //
 //   - a request Validate or the format refuses, a token source error, a transport failure, or a
 //     non-2xx reply, the same *APIError as Generate, is the sequence's only pair
-//   - a stream that ends before its terminal event matches io.ErrUnexpectedEOF
-//   - a read that fails, or an event the format can't decode, is returned wrapped
+//   - a cancelled or expired ctx is ctx's error, wrapped, matching context.Canceled or
+//     context.DeadlineExceeded; cancelling closes the connection, which stops the generation,
+//     and no event is yielded once ctx is done
+//   - a stream that ends before its terminal event matches io.ErrUnexpectedEOF, as does a read
+//     that fails, such as on a connection dropped or reset, whose error is wrapped too
+//   - an error frame from the endpoint, such as llama.cpp's data {"error": {...}}, is a
+//     *StreamError, matched with errors.As, holding its message, type, and code
+//   - an event the format can't decode is the format's error, wrapped
+//
+// Comments, such as llama.cpp's ping, a ":" line every 30 seconds, are no events and change
+// nothing.
 func (c *Client) GenerateStream(ctx context.Context, req *protocol.Request) iter.Seq2[protocol.Event, error] {
 	return func(yield func(protocol.Event, error) bool) {
 		if err := c.stream(ctx, req, yield); err != nil {
@@ -53,22 +63,27 @@ func (c *Client) stream(ctx context.Context, req *protocol.Request, yield func(p
 	}
 	defer func() { _ = resp.Body.Close() }()
 	// emit yields made, reporting whether the stream is over: the caller stopped, or its
-	// terminal event is yielded.
-	emit := func(made []protocol.Event) bool {
+	// terminal event is yielded. Once ctx is done it yields nothing and returns ctx's error.
+	emit := func(made []protocol.Event) (bool, error) {
 		for _, event := range made {
+			if err := ctx.Err(); err != nil {
+				return false, err
+			}
 			if !yield(event, nil) || terminal(event) {
-				return true
+				return true, nil
 			}
 		}
-		return false
+		return false, nil
 	}
 	events, decoder := sse.NewDecoder(resp.Body), c.format.NewStreamDecoder()
 	for {
 		e, err := events.Next()
 		if errors.Is(err, io.EOF) {
 			made, err := decoder.End()
-			switch {
-			case emit(made):
+			switch over, ctxErr := emit(made); {
+			case ctxErr != nil:
+				return ctxErr
+			case over:
 				return nil
 			case err != nil:
 				return err
@@ -76,18 +91,35 @@ func (c *Client) stream(ctx context.Context, req *protocol.Request, yield func(p
 			return fmt.Errorf("stream ended before its terminal event: %w", io.ErrUnexpectedEOF)
 		}
 		if err != nil {
-			return fmt.Errorf("read stream: %w", err)
+			return readError(ctx, err)
 		}
 		// The decoder takes the data alone: a format that names its events carries the name in
 		// the data too, so the event field is the framing's and isn't passed.
 		made, err := decoder.Decode([]byte(e.Data))
-		switch {
-		case emit(made):
+		switch over, ctxErr := emit(made); {
+		case ctxErr != nil:
+			return ctxErr
+		case over:
 			return nil
 		case err != nil:
 			return err
 		}
 	}
+}
+
+// readError is the error that ends a stream whose body failed to read with err. Once ctx is
+// done the transport has closed the connection, so the read failed because of ctx, and its
+// error is ctx's. Otherwise the stream ended before its terminal event: the error matches
+// io.ErrUnexpectedEOF, which the transport returns for a connection dropped mid-body, and also
+// err, such as a connection reset, which it returns for one broken another way.
+func readError(ctx context.Context, err error) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	if errors.Is(err, io.ErrUnexpectedEOF) {
+		return fmt.Errorf("read stream: %w", err)
+	}
+	return fmt.Errorf("read stream: %w: %w", io.ErrUnexpectedEOF, err)
 }
 
 // terminal reports whether e is a terminal event, the last of a stream.

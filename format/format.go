@@ -52,7 +52,8 @@ type StreamDecoder interface {
 	// Decode decodes data, the stream's next event's, and returns the protocol events it
 	// makes, which may be none. A chunk the format can't decode is an error, after which the
 	// stream is broken; with it, Decode returns the events it made before the error, which the
-	// client yields ahead of it.
+	// client yields ahead of it. An error frame, the endpoint's report in the stream that it
+	// failed, is a *StreamError, wrapped, and breaks the stream the same way.
 	Decode(data []byte) ([]protocol.Event, error)
 	// End is told the stream has ended, and returns the events that close it. A stream that
 	// ended before it was complete is an error matching io.ErrUnexpectedEOF.

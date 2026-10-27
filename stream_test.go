@@ -10,7 +10,9 @@ import (
 	"reflect"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	client "github.com/JaimeStill/spike-ai-pipeline-client"
@@ -240,5 +242,277 @@ func TestGenerateStreamEndsEarly(t *testing.T) {
 	}}}
 	if !reflect.DeepEqual(resp, want) {
 		t.Errorf("Response = %#v\nwant       %#v", resp, want)
+	}
+}
+
+// errorFrame is the event llama.cpp sends when generation fails mid-stream, ahead of ending the
+// stream: format_oai_sse of {"error": format_error_response(...)}.
+const errorFrame = `{"error":{"code":500,"message":"context shift is disabled","type":"server_error"}}`
+
+// partial is the Response a stream of streamed's chunks folds to when it breaks after its
+// message's text: in progress, holding text.
+func partial(text string) *protocol.Response {
+	return &protocol.Response{Status: protocol.StatusInProgress, Output: []protocol.Item{protocol.Message{
+		Status:  protocol.StatusInProgress,
+		Role:    protocol.RoleAssistant,
+		Content: []protocol.ContentPart{protocol.OutputText{Text: text}},
+	}}}
+}
+
+// body is a reply body that reads its text and then fails with err, or, when hang is set, waits
+// for ctx and then fails as the transport does once a request's context is done. It records
+// whether it was closed.
+type body struct {
+	text   io.Reader
+	err    error
+	hang   bool
+	ctx    context.Context
+	closed atomic.Bool
+}
+
+func (b *body) Read(p []byte) (int, error) {
+	n, err := b.text.Read(p)
+	if !errors.Is(err, io.EOF) {
+		return n, err
+	}
+	switch {
+	case b.hang:
+		<-b.ctx.Done()
+		return 0, errors.New("net/http: request canceled")
+	case b.err != nil:
+		return 0, b.err
+	}
+	return 0, io.EOF
+}
+
+func (b *body) Close() error {
+	b.closed.Store(true)
+	return nil
+}
+
+// roundTrip is an http.RoundTripper of a function.
+type roundTrip func(*http.Request) (*http.Response, error)
+
+func (f roundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// TestGenerateStreamError covers each error that breaks a stream once it has begun, in a bubble
+// whose transport is in memory, so a goroutine left behind would fail the test: the error ends
+// the sequence as its last pair, after the events before it, which fold to the partial Response
+// in progress, and the body is closed.
+func TestGenerateStreamError(t *testing.T) {
+	broken := eventStream(streamed[:3]...)
+	cases := []struct {
+		name string
+		// reply is the body, read before err; hang waits after it for the context, which
+		// timeout ends; cancel cancels the context at the first output_text delta.
+		reply   string
+		err     error
+		hang    bool
+		timeout time.Duration
+		cancel  bool
+		// text is the partial Response's text, and check the error's.
+		text  string
+		check func(t *testing.T, err error)
+	}{
+		{name: "stream ended before its terminal event", reply: broken, text: "Paris", check: func(t *testing.T, err error) {
+			if !errors.Is(err, io.ErrUnexpectedEOF) {
+				t.Errorf("error = %v, want io.ErrUnexpectedEOF", err)
+			}
+		}},
+		{name: "connection dropped", reply: broken, err: io.ErrUnexpectedEOF, text: "Paris", check: func(t *testing.T, err error) {
+			if !errors.Is(err, io.ErrUnexpectedEOF) {
+				t.Errorf("error = %v, want io.ErrUnexpectedEOF", err)
+			}
+		}},
+		{name: "connection reset", reply: broken, err: syscall.ECONNRESET, text: "Paris", check: func(t *testing.T, err error) {
+			if !errors.Is(err, io.ErrUnexpectedEOF) || !errors.Is(err, syscall.ECONNRESET) {
+				t.Errorf("error = %v, want io.ErrUnexpectedEOF wrapping the reset", err)
+			}
+		}},
+		{name: "error frame", reply: eventStream(append(streamed[:3:3], errorFrame, streamed[3])...), text: "Paris", check: func(t *testing.T, err error) {
+			var frame *client.StreamError
+			if !errors.As(err, &frame) || *frame != (client.StreamError{Message: "context shift is disabled", Type: "server_error", Code: "500"}) {
+				t.Errorf("error = %#v, want the frame's *StreamError", err)
+			}
+		}},
+		{name: "chunk the format can't decode", reply: eventStream(append(streamed[:3:3], `{"choices":`)...), text: "Paris", check: func(t *testing.T, err error) {
+			if !strings.Contains(err.Error(), "decode chunk") || errors.Is(err, io.ErrUnexpectedEOF) {
+				t.Errorf("error = %v, want the format's decode error", err)
+			}
+		}},
+		{name: "context cancelled", reply: eventStream(streamed...), cancel: true, text: "Par", check: func(t *testing.T, err error) {
+			if !errors.Is(err, context.Canceled) {
+				t.Errorf("error = %v, want context.Canceled", err)
+			}
+		}},
+		{name: "context deadline", reply: broken, hang: true, timeout: time.Minute, text: "Paris", check: func(t *testing.T, err error) {
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Errorf("error = %v, want context.DeadlineExceeded", err)
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				if tc.timeout > 0 {
+					ctx, cancel = context.WithTimeout(ctx, tc.timeout)
+					defer cancel()
+				}
+				var b *body
+				c := newClient(t, client.Config{BaseURL: "http://router/v1", HTTP: &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
+					b = &body{text: strings.NewReader(tc.reply), err: tc.err, hang: tc.hang, ctx: r.Context()}
+					return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: b, Request: r}, nil
+				})}})
+				var acc protocol.Accumulator
+				var errs []error
+				for e, err := range c.GenerateStream(ctx, hello()) {
+					if err != nil {
+						errs = append(errs, err)
+						continue
+					}
+					if len(errs) > 0 || ctx.Err() != nil {
+						t.Errorf("event %#v follows the error or the cancel", e)
+					}
+					if err := acc.Add(e); err != nil {
+						t.Errorf("Accumulator.Add: %v", err)
+					}
+					if _, ok := e.(protocol.OutputTextDelta); ok && tc.cancel {
+						cancel()
+					}
+				}
+				if len(errs) != 1 {
+					t.Fatalf("GenerateStream errors = %v, want one", errs)
+				}
+				tc.check(t, errs[0])
+				if got, want := acc.Response(), partial(tc.text); !reflect.DeepEqual(got, want) {
+					t.Errorf("Response = %#v\nwant       %#v", got, want)
+				}
+				if !b.closed.Load() {
+					t.Error("the body is open after the sequence ended")
+				}
+			})
+		})
+	}
+}
+
+// TestGenerateStreamCancel cancels the context mid-stream, against a server that keeps
+// generating until the client goes, and wants the context's error, the partial Response holding
+// the text so far, and the connection closed, which stops the generation.
+func TestGenerateStreamCancel(t *testing.T) {
+	gone := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer close(gone)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", streamed[0])
+		for {
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", streamed[1])
+			w.(http.Flusher).Flush()
+			select {
+			case <-r.Context().Done():
+				return
+			case <-time.After(time.Millisecond):
+			}
+		}
+	}))
+	t.Cleanup(srv.Close)
+	c := newClient(t, client.Config{BaseURL: srv.URL})
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var acc protocol.Accumulator
+	var text strings.Builder
+	var errs []error
+	for e, err := range c.GenerateStream(ctx, hello()) {
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if ctx.Err() != nil {
+			t.Errorf("event %#v follows the cancel", e)
+		}
+		if err := acc.Add(e); err != nil {
+			t.Errorf("Accumulator.Add: %v", err)
+		}
+		if d, ok := e.(protocol.OutputTextDelta); ok {
+			if text.WriteString(d.Delta); text.Len() >= 3*len("Par") {
+				cancel()
+			}
+		}
+	}
+	if len(errs) != 1 || !errors.Is(errs[0], context.Canceled) {
+		t.Fatalf("GenerateStream errors = %v, want one context.Canceled", errs)
+	}
+	if got, want := acc.Response(), partial(text.String()); !reflect.DeepEqual(got, want) {
+		t.Errorf("Response = %#v\nwant       %#v", got, want)
+	}
+	select {
+	case <-gone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the server is still generating after the cancel")
+	}
+}
+
+// TestGenerateStreamConnectionDropped has the server drop the connection mid-stream, and wants
+// io.ErrUnexpectedEOF after the events it sent, which fold to the partial Response.
+func TestGenerateStreamConnectionDropped(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, eventStream(streamed[:3]...))
+		w.(http.Flusher).Flush()
+		panic(http.ErrAbortHandler)
+	}))
+	t.Cleanup(srv.Close)
+	c := newClient(t, client.Config{BaseURL: srv.URL})
+	_, resp, errs := collect(t, c.GenerateStream(t.Context(), hello()))
+	if len(errs) != 1 || !errors.Is(errs[0], io.ErrUnexpectedEOF) {
+		t.Fatalf("GenerateStream errors = %v, want one io.ErrUnexpectedEOF", errs)
+	}
+	if want := partial("Paris"); !reflect.DeepEqual(resp, want) {
+		t.Errorf("Response = %#v\nwant       %#v", resp, want)
+	}
+}
+
+// TestGenerateStreamErrorFrame has the server send llama.cpp's error frame mid-stream, and wants
+// the frame's *StreamError, after the events before it, which fold to the partial Response, and
+// nothing of the chunk the server sends after it.
+func TestGenerateStreamErrorFrame(t *testing.T) {
+	srv := clienttest.NewServer(t, http.StatusOK, eventStream(append(streamed[:3:3], errorFrame, streamed[2])...))
+	c := newClient(t, client.Config{BaseURL: srv.URL})
+	_, resp, errs := collect(t, c.GenerateStream(t.Context(), hello()))
+	if len(errs) != 1 {
+		t.Fatalf("GenerateStream errors = %v, want one", errs)
+	}
+	var frame *client.StreamError
+	if !errors.As(errs[0], &frame) {
+		t.Fatalf("error = %v, want a *StreamError", errs[0])
+	}
+	if frame.Message != "context shift is disabled" || frame.Type != "server_error" || frame.Code != "500" {
+		t.Errorf("StreamError = %+v, want the frame's message, type, and code", *frame)
+	}
+	if want := "stream error: context shift is disabled (server_error, 500)"; !strings.HasSuffix(errs[0].Error(), want) {
+		t.Errorf("error = %q, want it to end %q", errs[0], want)
+	}
+	if want := partial("Paris"); !reflect.DeepEqual(resp, want) {
+		t.Errorf("Response = %#v\nwant       %#v", resp, want)
+	}
+}
+
+// TestGenerateStreamIgnoresPings interleaves llama.cpp's ping comments, ":" lines, with the
+// stream's events, and wants the same events and the same Response as the stream without them.
+func TestGenerateStreamIgnoresPings(t *testing.T) {
+	var b strings.Builder
+	for _, c := range streamed {
+		fmt.Fprintf(&b, ":\n\ndata: %s\n\n: ping\n", c)
+	}
+	pinged := clienttest.NewServer(t, http.StatusOK, b.String())
+	plain := clienttest.NewServer(t, http.StatusOK, eventStream(streamed...))
+	events, got, errs := collect(t, newClient(t, client.Config{BaseURL: pinged.URL}).GenerateStream(t.Context(), hello()))
+	if len(errs) > 0 {
+		t.Fatalf("GenerateStream errors: %v", errs)
+	}
+	wantEvents, want, _ := collect(t, newClient(t, client.Config{BaseURL: plain.URL}).GenerateStream(t.Context(), hello()))
+	if !reflect.DeepEqual(events, wantEvents) || !reflect.DeepEqual(got, want) {
+		t.Errorf("with pings: %d events, Response %#v\nwant %d events, Response %#v", len(events), got, len(wantEvents), want)
 	}
 }

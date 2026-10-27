@@ -56,8 +56,8 @@
 //   - [IncompleteReason] is that reason, [ReasonMaxOutputTokens] or [ReasonContentFilter].
 //   - [Usage] counts a request's tokens.
 //   - [OutputTokensDetails] breaks the output tokens down.
-//   - [Status] is a response's or item's status, [StatusInProgress], [StatusCompleted], or
-//     [StatusIncomplete].
+//   - [Status] is a response's or item's status, [StatusInProgress], [StatusCompleted],
+//     [StatusIncomplete], or [StatusFailed].
 //   - [Item] is one unit of a conversation, carried in Input and Output, a closed set.
 //   - [Message] is a message item: content parts from a role.
 //   - [Role] is a message's author: [RoleUser], [RoleSystem], [RoleDeveloper], or

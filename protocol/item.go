@@ -237,7 +237,7 @@ type SummaryText struct {
 // Status is the status of a response or of an item in its output.
 type Status string
 
-// The statuses a stateless response and its items take.
+// The statuses a stateless response and its items take, under the spec's names.
 const (
 	// StatusInProgress is a response or item the model is still producing: one a stream has
 	// begun and not finished.
@@ -247,4 +247,7 @@ const (
 	// StatusIncomplete is a response or item the model stopped before finishing; a response's
 	// IncompleteDetails says why.
 	StatusIncomplete Status = "incomplete"
+	// StatusFailed is a response that failed before the model finished it, as a stream's
+	// terminal response.failed carries it.
+	StatusFailed Status = "failed"
 )

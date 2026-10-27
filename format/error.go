@@ -3,6 +3,7 @@ package format
 import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"strings"
 )
 
 // DecodeOpenAIError decodes an OpenAI-style error body, {"error": {"message", "type", "code"}},
@@ -47,4 +48,37 @@ type openAIErrorObject struct {
 	Message string         `json:"message"`
 	Type    string         `json:"type"`
 	Code    jsontext.Value `json:"code"`
+}
+
+// StreamError is an error frame in a streamed reply: the endpoint failed after the stream began
+// and said so in the stream, as llama.cpp does with an event of data {"error": {...}}, in the
+// shape of an OpenAI-style error body, before it ends the stream. A StreamDecoder returns it,
+// wrapped, from Decode, and the client yields it as the stream's last pair, where callers reach
+// it with errors.As, as client.StreamError.
+type StreamError struct {
+	// Message is the endpoint's error message.
+	Message string
+	// Type is the endpoint's error type, such as "server_error", when it gave one.
+	Type string
+	// Code is the endpoint's error code, when it gave one. A numeric code is kept as its
+	// decimal text.
+	Code string
+}
+
+// Error reports the endpoint's message, with its type and code when it gave them.
+func (e *StreamError) Error() string {
+	s := "stream error"
+	if e.Message != "" {
+		s += ": " + e.Message
+	}
+	var detail []string
+	for _, d := range []string{e.Type, e.Code} {
+		if d != "" {
+			detail = append(detail, d)
+		}
+	}
+	if len(detail) > 0 {
+		s += " (" + strings.Join(detail, ", ") + ")"
+	}
+	return s
 }

@@ -58,7 +58,8 @@ func (ResponseIncomplete) event() {}
 type ResponseFailed struct {
 	// SequenceNumber is the event's place in the stream.
 	SequenceNumber int
-	// Response is the response as it failed, with the output made before the failure.
+	// Response is the response as it failed, its status StatusFailed, with the output made
+	// before the failure.
 	Response *Response
 }
 

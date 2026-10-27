@@ -2,6 +2,7 @@ package completions
 
 import (
 	"encoding/base64"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -211,7 +212,9 @@ func (*Format) DecodeError(body []byte) (message, typ, code string) {
 // arrived, where it closes with the terminal event: response.completed or
 // response.incomplete, as the finish_reason gives, its response holding the output and the
 // usage of the chunk that carried it. A stream that ends with no finish_reason is
-// io.ErrUnexpectedEOF; so is [DONE] without one. A chunk that isn't JSON, an unknown
+// io.ErrUnexpectedEOF; so is [DONE] without one. An error frame, an event whose data is an
+// OpenAI-style error body, {"error": {...}}, as llama.cpp sends when generation fails mid-stream,
+// is a *format.StreamError holding its message, type, and code. A chunk that isn't JSON, an unknown
 // finish_reason, a delta after the finish_reason, or an event after [DONE] is an error. The
 // stream's id is its first chunk's, which every chunk repeats; a chunk with another id is an
 // error. Each item's id, its events' item_id, is the one DecodeResponse gives it: itemID derives
@@ -319,7 +322,17 @@ func (d *streamDecoder) decode(data []byte) error {
 	}
 	var c chunk
 	if err := json.Unmarshal(data, &c); err != nil {
-		return fmt.Errorf("decode chunk: %w", err)
+		// The JSON error is formatted, not wrapped: a chunk cut short wraps io.ErrUnexpectedEOF,
+		// which in a stream means the stream ended before its terminal event, and this chunk
+		// arrived whole.
+		return fmt.Errorf("decode chunk: %v", err)
+	}
+	// An error frame is the endpoint's report that the stream failed, ahead of its end; its body
+	// is an OpenAI-style error's, which DecodeOpenAIError reads.
+	if len(c.Error) > 0 && c.Error.Kind() != jsontext.KindNull {
+		e := &format.StreamError{}
+		e.Message, e.Type, e.Code = format.DecodeOpenAIError(data)
+		return e
 	}
 	switch {
 	case !d.chunked:

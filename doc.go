@@ -33,4 +33,5 @@
 //   - [Transcription] is a clip's transcript and usage.
 //   - [TranscriptionUsage] counts the tokens a transcription took.
 //   - [APIError] is a non-2xx reply, matched with errors.As.
+//   - [StreamError] is an error frame in a streamed reply, matched with errors.As.
 package client

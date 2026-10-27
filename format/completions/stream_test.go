@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/JaimeStill/spike-ai-pipeline-client/format"
 	"github.com/JaimeStill/spike-ai-pipeline-client/format/completions"
 	"github.com/JaimeStill/spike-ai-pipeline-client/internal/sse"
 	"github.com/JaimeStill/spike-ai-pipeline-client/protocol"
@@ -814,6 +815,61 @@ func TestStreamRefusesChunk(t *testing.T) {
 				t.Error("Decode after an error = nil, want the stream broken")
 			}
 		})
+	}
+}
+
+// TestStreamErrorFrame wants an error frame, llama.cpp's report that generation failed
+// mid-stream, to be a *format.StreamError of its message, type, and code, after the events
+// before it, and to break the stream: the frame alone, which carries no id, as the first event or
+// after chunks of an id, and in each shape an OpenAI-style error body takes.
+func TestStreamErrorFrame(t *testing.T) {
+	text := delta(`{"content":"Paris"}`, "")
+	cases := []struct {
+		name   string
+		chunks []string
+		want   format.StreamError
+		trace  string
+	}{
+		{"llama.cpp's, mid-stream", []string{text, `{"error":{"code":500,"message":"context shift is disabled","type":"server_error"}}`},
+			format.StreamError{Message: "context shift is disabled", Type: "server_error", Code: "500"}, `
+			0 response.created in_progress
+			1 response.output_item.added 0 protocol.Message{ID:"chatcmpl-1/0", Status:"in_progress", Role:"assistant", Content:[]protocol.ContentPart(nil)}
+			2 response.content_part.added 0 0 chatcmpl-1/0 protocol.OutputText{Text:""}
+			3 response.output_text.delta 0 0 chatcmpl-1/0 "Paris"`},
+		{"first, of a string code", []string{`{"error":{"message":"slow down","type":"rate_limit","code":"rate_limit_exceeded"}}`},
+			format.StreamError{Message: "slow down", Type: "rate_limit", Code: "rate_limit_exceeded"}, `
+			0 response.created in_progress`},
+		{"a bare string", []string{text, `{"error":"model unloaded"}`}, format.StreamError{Message: "model unloaded"}, ""},
+		{"of another shape", []string{text, `{"error":42}`}, format.StreamError{}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := decodeStream(t, stream(tc.chunks...))
+			var frame *format.StreamError
+			if !errors.As(r.err, &frame) || *frame != tc.want {
+				t.Fatalf("stream error = %#v, want %#v", r.err, tc.want)
+			}
+			if tc.trace != "" {
+				assertTrace(t, r.events, tc.trace)
+			}
+			decoder := completions.New().NewStreamDecoder()
+			for _, c := range tc.chunks {
+				_, _ = decoder.Decode([]byte(c))
+			}
+			if _, err := decoder.Decode([]byte(text)); err == nil {
+				t.Error("Decode after the error frame = nil, want the stream broken")
+			}
+		})
+	}
+}
+
+// TestStreamDecodeErrorIsNoEndOfStream wants a chunk cut short, whose JSON error wraps
+// io.ErrUnexpectedEOF, reported as a chunk the format can't decode, not as a stream that ended
+// early.
+func TestStreamDecodeErrorIsNoEndOfStream(t *testing.T) {
+	_, err := completions.New().NewStreamDecoder().Decode([]byte(`{"choices":`))
+	if err == nil || !strings.Contains(err.Error(), "decode chunk") || errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Errorf("Decode error = %v, want a decode error that doesn't match io.ErrUnexpectedEOF", err)
 	}
 }
 

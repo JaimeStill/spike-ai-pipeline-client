@@ -186,7 +186,8 @@ type usage struct {
 // chunk is the part of a streamed reply's chunk, chat.completion.chunk, the format reads. A
 // null finish_reason or delta member decodes as empty. Usage is set on the chunk that carries
 // it, with stream_options.include_usage the last, of no choices. Members it doesn't read, such
-// as llama.cpp's timings, are ignored.
+// as llama.cpp's timings, are ignored. Error is set on an error frame, which carries no choices:
+// an OpenAI-style error body in place of a chunk.
 type chunk struct {
 	// ID is the reply's id, which every chunk of the stream repeats.
 	ID      string `json:"id"`
@@ -200,7 +201,8 @@ type chunk struct {
 		} `json:"delta"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
-	Usage *usage `json:"usage"`
+	Usage *usage         `json:"usage"`
+	Error jsontext.Value `json:"error"`
 }
 
 // toolCallDelta is a fragment of a tool call in a streamed reply's delta, its call found by
