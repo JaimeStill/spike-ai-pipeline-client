@@ -13,7 +13,7 @@
 // A streamed response arrives as the spec's streaming events, the [Event] set, and an
 // [Accumulator] folds them into the Response an unstreamed request returns. The subset is the
 // state events response.created and the terminal response.completed, response.incomplete, and
-// response.failed; the item events response.output_item.added and .done; the part events
+// response.failed; the error event, error, which response.failed follows; the item events response.output_item.added and .done; the part events
 // response.content_part.added and .done; the text events response.output_text.delta and .done,
 // response.refusal.delta and .done, and response.reasoning.delta and .done, the last of a
 // Reasoning item's reasoning_text part; and the argument events
@@ -51,9 +51,10 @@
 //     [ReasoningEffortLow], [ReasoningEffortMedium], [ReasoningEffortHigh], or
 //     [ReasoningEffortXHigh].
 //   - [Request.Validate] refuses a request the model can't describe.
-//   - [Response] is a model's response: output, status, and usage.
+//   - [Response] is a model's response: output, status, error, and usage.
 //   - [IncompleteDetails] says why a response is incomplete.
 //   - [IncompleteReason] is that reason, [ReasonMaxOutputTokens] or [ReasonContentFilter].
+//   - [ResponseError] is the error a failed response holds: code and message.
 //   - [Usage] counts a request's tokens.
 //   - [OutputTokensDetails] breaks the output tokens down.
 //   - [Status] is a response's or item's status, [StatusInProgress], [StatusCompleted],
@@ -91,6 +92,9 @@
 //   - [ResponseIncomplete] is response.incomplete, the terminal event of a response the model
 //     stopped early.
 //   - [ResponseFailed] is response.failed, the terminal event of a failed response.
+//   - [ErrorEvent] is error, the server's report that the response failed, ahead of
+//     response.failed.
+//   - [ErrorPayload] is the error an ErrorEvent carries: type, code, message, and param.
 //   - [OutputItemAdded] is response.output_item.added, an output item begun.
 //   - [OutputItemDone] is response.output_item.done, an output item finished, whole.
 //   - [ContentPartAdded] is response.content_part.added, a content part begun.

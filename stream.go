@@ -20,9 +20,16 @@ import (
 // no goroutine; breaking out of the loop closes the reply's body.
 //
 // Each pair holds an event or an error, never both. The events run from
-// protocol.ResponseCreated to one terminal event, after which the sequence ends. An error ends
-// the sequence as its last pair, and no event follows it; the events before it fold, in a
-// protocol.Accumulator, to the partial Response, in protocol.StatusInProgress:
+// protocol.ResponseCreated to one terminal event, after which the sequence ends. A failure the
+// endpoint reports in the stream, such as llama.cpp's error frame, data {"error": {...}}, is no
+// error pair: the stream ends as the spec has it, with protocol.ErrorEvent, holding the error's
+// type, code, message, and param, and then the terminal protocol.ResponseFailed, whose Response
+// is in protocol.StatusFailed, its Error the failure, holding the output made before it. The
+// caller checks the folded Response's Status for StatusFailed as it does for StatusIncomplete.
+//
+// Error pairs are for a stream that breaks, or never begins. An error ends the sequence as its
+// last pair, and no event follows it; the events before it fold, in a protocol.Accumulator, to
+// the partial Response, in protocol.StatusInProgress:
 //
 //   - a request Validate or the format refuses, a token source error, a transport failure, or a
 //     non-2xx reply, the same *APIError as Generate, is the sequence's only pair
@@ -31,8 +38,6 @@ import (
 //     and no event is yielded once ctx is done
 //   - a stream that ends before its terminal event matches io.ErrUnexpectedEOF, as does a read
 //     that fails, such as on a connection dropped or reset, whose error is wrapped too
-//   - an error frame from the endpoint, such as llama.cpp's data {"error": {...}}, is a
-//     *StreamError, matched with errors.As, holding its message, type, and code
 //   - an event the format can't decode is the format's error, wrapped
 //
 // Comments, such as llama.cpp's ping, a ":" line every 30 seconds, are no events and change

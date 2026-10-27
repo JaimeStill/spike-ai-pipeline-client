@@ -7,9 +7,10 @@ package protocol
 // the item is done, in that order: a Message's parts are OutputText and Refusal, and a
 // Reasoning item's ReasoningText; a FunctionCall, which has no content parts, streams its
 // arguments as deltas and their done event between being added and being done. An Accumulator
-// folds the events back into the Response. The set is closed: the event types are this
-// package's, and an event is one of them by value, such as OutputTextDelta, never a pointer to
-// one.
+// folds the events back into the Response. A failure the server reports is the error event,
+// ErrorEvent, which response.failed follows, as the spec has every streaming error followed. The
+// set is closed: the event types are this package's, and an event is one of them by value, such
+// as OutputTextDelta, never a pointer to one.
 //
 // Every event carries its SequenceNumber, which increases through the stream. An event about an
 // output item carries the item's OutputIndex, its place in the Response's Output; an event about
@@ -58,12 +59,38 @@ func (ResponseIncomplete) event() {}
 type ResponseFailed struct {
 	// SequenceNumber is the event's place in the stream.
 	SequenceNumber int
-	// Response is the response as it failed, its status StatusFailed, with the output made
-	// before the failure.
+	// Response is the response as it failed, its status StatusFailed and its Error the
+	// failure, with the output made before it: each item done as it was done, and an item
+	// still open with the content, or the arguments, made so far, in StatusInProgress.
 	Response *Response
 }
 
 func (ResponseFailed) event() {}
+
+// ErrorEvent is error: the server reports that the response failed, with the error. The spec
+// has response.failed follow it, closing the stream.
+type ErrorEvent struct {
+	// SequenceNumber is the event's place in the stream.
+	SequenceNumber int
+	// Error is the error the server reported.
+	Error ErrorPayload
+}
+
+func (ErrorEvent) event() {}
+
+// ErrorPayload is the error an ErrorEvent carries: the spec's ErrorPayload, without its optional
+// headers.
+type ErrorPayload struct {
+	// Type is the error's type, such as "server_error" or "model_error". The spec requires one;
+	// it is empty when the endpoint gave none.
+	Type string
+	// Code is the error's code, empty when it has none.
+	Code string
+	// Message is the human-readable error message.
+	Message string
+	// Param is the request parameter the error concerns, empty when it concerns none.
+	Param string
+}
 
 // OutputItemAdded is response.output_item.added: an output item was added, before any event
 // about its content, its status StatusInProgress when it has one.

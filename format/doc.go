@@ -5,15 +5,13 @@
 // the client.
 //
 // It holds the contract and what the formats share: the OpenAI-style error body, which every
-// OpenAI-compatible endpoint answers with, so completions decodes its errors with it, and so
-// does the client for its operations outside the Format, such as embeddings; and the
-// StreamError a stream decoder returns for an error frame, which the client yields as it is.
+// OpenAI-compatible endpoint answers with, so completions decodes its errors, and its streams'
+// error frames, with it, and so does the client for its operations outside the Format, such as
+// embeddings.
 //
 // Its exported identifiers:
 //
 //   - [Format] is a wire format, the adapter between the protocol and one API's shape.
 //   - [StreamDecoder] turns one streamed reply's events into the protocol's streaming events.
 //   - [DecodeOpenAIError] decodes an OpenAI-style error body's message, type, and code.
-//   - [StreamError] is an error frame in a streamed reply, the endpoint's failure after the
-//     stream began.
 package format

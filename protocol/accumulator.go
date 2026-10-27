@@ -19,8 +19,13 @@ import (
 // is already done, an item_id that isn't the id of the item at the event's output_index, a part
 // added before the one ahead of it is done, an item done before its parts, or a function call's
 // arguments, are done, a done event whose text, arguments, or content isn't what the deltas made,
-// and a terminal response.completed or response.incomplete while an item is open. A refused event
-// changes nothing.
+// and a terminal response.completed or response.incomplete while an item is open or after an
+// error event. A refused event changes nothing.
+//
+// An error event, the server's report that the response failed, changes nothing of the response:
+// the response.failed that follows it carries the failure, in its Response's Error, and that
+// Response is the one folded, as it is after any terminal event. response.failed may follow an
+// item still open, as a stream may fail part way.
 //
 // It folds message items, of output_text and refusal parts, reasoning items, of reasoning_text
 // parts, and function_call items, of argument deltas. A done reasoning item's encrypted content
@@ -28,6 +33,9 @@ import (
 // gives them. Its zero value is ready to use; it isn't safe for concurrent use.
 type Accumulator struct {
 	created, ended bool
+	// errored is set once an error event is added, after which the terminal event must be
+	// response.failed.
+	errored bool
 	// seq is the sequence number of the last event added.
 	seq int
 	// resp is the created response, and then the terminal one.
@@ -107,6 +115,8 @@ func (a *Accumulator) fold(e Event) error {
 		return a.end(e.Response, true)
 	case ResponseFailed:
 		return a.end(e.Response, false)
+	case ErrorEvent:
+		a.errored = true
 	case OutputItemAdded:
 		return a.addItem(e)
 	case OutputItemDone:
@@ -156,12 +166,17 @@ func (a *Accumulator) fold(e Event) error {
 }
 
 // end folds a terminal event's response r. A completed or incomplete response, closed, follows
-// only once every item is done, and holds them all; a failed one may follow at any point.
+// only once every item is done, and holds them all, and never after an error event; a failed one
+// may follow at any point.
 func (a *Accumulator) end(r *Response, closed bool) error {
 	if r == nil {
 		return errors.New("no response")
 	}
 	if closed {
+		// The spec has every error in a stream followed by response.failed.
+		if a.errored {
+			return errors.New("the stream reported an error, want response.failed")
+		}
 		for i, it := range a.items {
 			if !it.done {
 				return fmt.Errorf("output %d isn't done", i)
@@ -532,6 +547,8 @@ func describe(e Event) (name string, seq int, ok bool) {
 		return "response.incomplete", e.SequenceNumber, true
 	case ResponseFailed:
 		return "response.failed", e.SequenceNumber, true
+	case ErrorEvent:
+		return "error", e.SequenceNumber, true
 	case OutputItemAdded:
 		return "response.output_item.added", e.SequenceNumber, true
 	case OutputItemDone:

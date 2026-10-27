@@ -113,6 +113,9 @@ func TestAccumulatorRefusesEvent(t *testing.T) {
 		{"nil", 0, nil, "unsupported event <nil>"},
 		{"a pointer", 0, &protocol.ResponseCreated{}, "unsupported event *protocol.ResponseCreated"},
 		{"an event before response.created", 0, protocol.OutputItemAdded{Item: message}, "before response.created"},
+		{"an error event before response.created", 0, protocol.ErrorEvent{}, "error before response.created"},
+		{"an error event after the terminal event", 13, protocol.ErrorEvent{SequenceNumber: 13}, "error after the terminal event"},
+		{"an error event of a repeated sequence number", 4, protocol.ErrorEvent{SequenceNumber: 3}, "error's sequence number 3 doesn't follow 3"},
 		{"response.created twice", 1, protocol.ResponseCreated{SequenceNumber: 1, Response: &protocol.Response{}}, "already created"},
 		{"response.created with no response", 0, protocol.ResponseCreated{}, "no response"},
 		{"response.created with output", 0, protocol.ResponseCreated{Response: &protocol.Response{Output: []protocol.Item{message}}}, "has output"},
@@ -173,6 +176,54 @@ func TestAccumulatorFailedWithItemOpen(t *testing.T) {
 	}
 	if got := acc.Response(); !reflect.DeepEqual(got, failed) {
 		t.Errorf("Response = %#v, want the failed response %#v", got, failed)
+	}
+}
+
+// TestAccumulatorErrorEvent wants the error event, a failure the server reports, to change
+// nothing of the response, and the response.failed after it, with an item still open, to be the
+// Response folded: failed, holding its error and the output made before the failure.
+func TestAccumulatorErrorEvent(t *testing.T) {
+	var acc protocol.Accumulator
+	add(t, &acc, textStream()[:4])
+	before := acc.Response()
+	payload := protocol.ErrorPayload{Type: "server_error", Code: "500", Message: "context shift is disabled"}
+	if err := acc.Add(protocol.ErrorEvent{SequenceNumber: 4, Error: payload}); err != nil {
+		t.Fatalf("Add(error): %v", err)
+	}
+	if got := acc.Response(); !reflect.DeepEqual(got, before) {
+		t.Errorf("Response after the error event = %#v, want it unchanged, %#v", got, before)
+	}
+	failed := &protocol.Response{
+		Output: before.Output,
+		Status: protocol.StatusFailed,
+		Error:  &protocol.ResponseError{Code: payload.Code, Message: payload.Message},
+	}
+	if err := acc.Add(protocol.ResponseFailed{SequenceNumber: 5, Response: failed}); err != nil {
+		t.Fatalf("Add(response.failed): %v", err)
+	}
+	if got := acc.Response(); !reflect.DeepEqual(got, failed) {
+		t.Errorf("Response = %#v\nwant the failed response %#v", got, failed)
+	}
+}
+
+// TestAccumulatorRefusesTerminalAfterError wants response.completed and response.incomplete
+// refused after an error event, which the spec has response.failed follow, even with every item
+// done.
+func TestAccumulatorRefusesTerminalAfterError(t *testing.T) {
+	events := textStream()
+	completed := events[len(events)-1].(protocol.ResponseCompleted)
+	terminals := []protocol.Event{
+		protocol.ResponseCompleted{SequenceNumber: 13, Response: completed.Response},
+		protocol.ResponseIncomplete{SequenceNumber: 13, Response: completed.Response},
+	}
+	for _, terminal := range terminals {
+		var acc protocol.Accumulator
+		add(t, &acc, events[:len(events)-1])
+		add(t, &acc, []protocol.Event{protocol.ErrorEvent{SequenceNumber: 12}})
+		err := acc.Add(terminal)
+		if err == nil || !strings.Contains(err.Error(), "want response.failed") {
+			t.Errorf("Add(%T) after an error event = %v, want it refused", terminal, err)
+		}
 	}
 }
 

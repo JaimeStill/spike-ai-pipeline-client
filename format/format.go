@@ -50,10 +50,12 @@ type Format interface {
 // format has one, from the data. It serves one stream, and isn't safe for concurrent use.
 type StreamDecoder interface {
 	// Decode decodes data, the stream's next event's, and returns the protocol events it
-	// makes, which may be none. A chunk the format can't decode is an error, after which the
-	// stream is broken; with it, Decode returns the events it made before the error, which the
-	// client yields ahead of it. An error frame, the endpoint's report in the stream that it
-	// failed, is a *StreamError, wrapped, and breaks the stream the same way.
+	// makes, which may be none. An error frame, the endpoint's report in the stream that the
+	// response failed, is no error: it closes the stream as the spec has it, with the error
+	// event, protocol.ErrorEvent, and then the terminal protocol.ResponseFailed, its Response
+	// failed, holding the error and the output made before the frame. A chunk the format can't
+	// decode is an error, after which the stream is broken; with it, Decode returns the events
+	// it made before the error, which the client yields ahead of it.
 	Decode(data []byte) ([]protocol.Event, error)
 	// End is told the stream has ended, and returns the events that close it. A stream that
 	// ended before it was complete is an error matching io.ErrUnexpectedEOF.

@@ -13,7 +13,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JaimeStill/spike-ai-pipeline-client/format"
 	"github.com/JaimeStill/spike-ai-pipeline-client/format/completions"
 	"github.com/JaimeStill/spike-ai-pipeline-client/internal/sse"
 	"github.com/JaimeStill/spike-ai-pipeline-client/protocol"
@@ -119,6 +118,10 @@ func trace(events []protocol.Event) string {
 			fmt.Fprintf(&b, "%d response.completed %d items\n", e.SequenceNumber, len(e.Response.Output))
 		case protocol.ResponseIncomplete:
 			fmt.Fprintf(&b, "%d response.incomplete %d items\n", e.SequenceNumber, len(e.Response.Output))
+		case protocol.ResponseFailed:
+			fmt.Fprintf(&b, "%d response.failed %d items\n", e.SequenceNumber, len(e.Response.Output))
+		case protocol.ErrorEvent:
+			fmt.Fprintf(&b, "%d error %#v\n", e.SequenceNumber, e.Error)
 		case protocol.OutputItemAdded:
 			fmt.Fprintf(&b, "%d response.output_item.added %d %#v\n", e.SequenceNumber, e.OutputIndex, e.Item)
 		case protocol.OutputItemDone:
@@ -819,45 +822,112 @@ func TestStreamRefusesChunk(t *testing.T) {
 }
 
 // TestStreamErrorFrame wants an error frame, llama.cpp's report that generation failed
-// mid-stream, to be a *format.StreamError of its message, type, and code, after the events
-// before it, and to break the stream: the frame alone, which carries no id, as the first event or
-// after chunks of an id, and in each shape an OpenAI-style error body takes.
+// mid-stream, to close the stream as the spec has it: the error event of the frame's type, code,
+// message, and param, then response.failed, its response failed, its error the frame's code and
+// message, holding the output made before the frame, the item open at it in progress with what
+// it had, which is what the Accumulator held just before the frame. The frame alone carries no
+// id; it comes as the first event, after response.created, or after chunks of an id, in each
+// shape an OpenAI-style error body takes, and with each kind of item open. An event after it is
+// an error, and End makes nothing.
 func TestStreamErrorFrame(t *testing.T) {
 	text := delta(`{"content":"Paris"}`, "")
+	const llama = `{"error":{"code":500,"message":"context shift is disabled","type":"server_error"}}`
+	message := func(content ...protocol.ContentPart) protocol.Item {
+		return protocol.Message{ID: "chatcmpl-1/0", Status: protocol.StatusInProgress, Role: protocol.RoleAssistant, Content: content}
+	}
 	cases := []struct {
 		name   string
 		chunks []string
-		want   format.StreamError
-		trace  string
+		// payload is the error event's, output the failed response's, and usage its usage.
+		payload protocol.ErrorPayload
+		output  []protocol.Item
+		usage   protocol.Usage
+		trace   string
 	}{
-		{"llama.cpp's, mid-stream", []string{text, `{"error":{"code":500,"message":"context shift is disabled","type":"server_error"}}`},
-			format.StreamError{Message: "context shift is disabled", Type: "server_error", Code: "500"}, `
+		{name: "llama.cpp's, mid-stream", chunks: []string{text, llama},
+			payload: protocol.ErrorPayload{Type: "server_error", Code: "500", Message: "context shift is disabled"},
+			output:  []protocol.Item{message(protocol.OutputText{Text: "Paris"})},
+			trace: `
 			0 response.created in_progress
 			1 response.output_item.added 0 protocol.Message{ID:"chatcmpl-1/0", Status:"in_progress", Role:"assistant", Content:[]protocol.ContentPart(nil)}
 			2 response.content_part.added 0 0 chatcmpl-1/0 protocol.OutputText{Text:""}
-			3 response.output_text.delta 0 0 chatcmpl-1/0 "Paris"`},
-		{"first, of a string code", []string{`{"error":{"message":"slow down","type":"rate_limit","code":"rate_limit_exceeded"}}`},
-			format.StreamError{Message: "slow down", Type: "rate_limit", Code: "rate_limit_exceeded"}, `
-			0 response.created in_progress`},
-		{"a bare string", []string{text, `{"error":"model unloaded"}`}, format.StreamError{Message: "model unloaded"}, ""},
-		{"of another shape", []string{text, `{"error":42}`}, format.StreamError{}, ""},
+			3 response.output_text.delta 0 0 chatcmpl-1/0 "Paris"
+			4 error protocol.ErrorPayload{Type:"server_error", Code:"500", Message:"context shift is disabled", Param:""}
+			5 response.failed 1 items`},
+		{name: "first, of a string code and a param", chunks: []string{`{"error":{"message":"no such model","type":"invalid_request_error","param":"model","code":"model_not_found"}}`},
+			payload: protocol.ErrorPayload{Type: "invalid_request_error", Code: "model_not_found", Message: "no such model", Param: "model"},
+			trace: `
+			0 response.created in_progress
+			1 error protocol.ErrorPayload{Type:"invalid_request_error", Code:"model_not_found", Message:"no such model", Param:"model"}
+			2 response.failed 0 items`},
+		{name: "a bare string", chunks: []string{text, `{"error":"model unloaded"}`},
+			payload: protocol.ErrorPayload{Message: "model unloaded"},
+			output:  []protocol.Item{message(protocol.OutputText{Text: "Paris"})}},
+		{name: "of another shape", chunks: []string{text, `{"error":42}`},
+			output: []protocol.Item{message(protocol.OutputText{Text: "Paris"})}},
+		{name: "with a refusal part open after a text part", chunks: []string{text, delta(`{"refusal":"No"}`, ""), llama},
+			payload: protocol.ErrorPayload{Type: "server_error", Code: "500", Message: "context shift is disabled"},
+			output:  []protocol.Item{message(protocol.OutputText{Text: "Paris"}, protocol.Refusal{Refusal: "No"})}},
+		{name: "with reasoning open", chunks: []string{delta(`{"reasoning_content":"Hm."}`, ""), llama},
+			payload: protocol.ErrorPayload{Type: "server_error", Code: "500", Message: "context shift is disabled"},
+			output:  []protocol.Item{protocol.Reasoning{ID: "chatcmpl-1/0", Status: protocol.StatusInProgress, Content: []protocol.ReasoningText{{Text: "Hm."}}}}},
+		{name: "with a call open after the message", chunks: []string{text, delta(callDelta(0, "c1", "get_weather", `{"city":`), ""), llama},
+			payload: protocol.ErrorPayload{Type: "server_error", Code: "500", Message: "context shift is disabled"},
+			output: []protocol.Item{
+				protocol.Message{ID: "chatcmpl-1/0", Status: protocol.StatusCompleted, Role: protocol.RoleAssistant, Content: []protocol.ContentPart{protocol.OutputText{Text: "Paris"}}},
+				protocol.FunctionCall{ID: "chatcmpl-1/1", Status: protocol.StatusInProgress, CallID: "c1", Name: "get_weather", Arguments: `{"city":`},
+			}},
+		{name: "after the finish_reason and the usage", chunks: []string{text, delta(`{}`, "stop"), usageChunk, llama},
+			payload: protocol.ErrorPayload{Type: "server_error", Code: "500", Message: "context shift is disabled"},
+			output:  []protocol.Item{protocol.Message{ID: "chatcmpl-1/0", Status: protocol.StatusCompleted, Role: protocol.RoleAssistant, Content: []protocol.ContentPart{protocol.OutputText{Text: "Paris"}}}},
+			usage:   protocol.Usage{InputTokens: 7, OutputTokens: 5, TotalTokens: 12}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			r := decodeStream(t, stream(tc.chunks...))
-			var frame *format.StreamError
-			if !errors.As(r.err, &frame) || *frame != tc.want {
-				t.Fatalf("stream error = %#v, want %#v", r.err, tc.want)
+			if r.err != nil {
+				t.Fatalf("stream error = %v, want the stream closed with response.failed", r.err)
 			}
 			if tc.trace != "" {
 				assertTrace(t, r.events, tc.trace)
 			}
+			n := len(r.events)
+			if n < 2 {
+				t.Fatalf("%d events, want the error event and response.failed last", n)
+			}
+			e, ok := r.events[n-2].(protocol.ErrorEvent)
+			if !ok || e.Error != tc.payload {
+				t.Errorf("next to last event = %#v, want the error event of %#v", r.events[n-2], tc.payload)
+			}
+			failed, ok := r.events[n-1].(protocol.ResponseFailed)
+			if !ok {
+				t.Fatalf("last event = %#v, want response.failed", r.events[n-1])
+			}
+			want := &protocol.Response{
+				Output: tc.output,
+				Status: protocol.StatusFailed,
+				Error:  &protocol.ResponseError{Code: tc.payload.Code, Message: tc.payload.Message},
+				Usage:  tc.usage,
+			}
+			assertResponse(t, failed.Response, want)
+			assertResponse(t, fold(t, r.events), want)
+			// The failed response's output is what the Accumulator held just before the frame.
+			before := fold(t, r.events[:n-2])
+			if !reflect.DeepEqual(before.Output, tc.output) {
+				t.Errorf("output before the frame = %#v\nwant the failed response's %#v", before.Output, tc.output)
+			}
+
 			decoder := completions.New().NewStreamDecoder()
 			for _, c := range tc.chunks {
-				_, _ = decoder.Decode([]byte(c))
+				if _, err := decoder.Decode([]byte(c)); err != nil {
+					t.Fatalf("Decode: %v", err)
+				}
 			}
-			if _, err := decoder.Decode([]byte(text)); err == nil {
-				t.Error("Decode after the error frame = nil, want the stream broken")
+			if events, err := decoder.Decode([]byte(text)); err == nil || len(events) > 0 {
+				t.Errorf("Decode after the error frame = %v, %v; want no events and the stream ended", events, err)
+			}
+			if events, err := decoder.End(); err != nil || len(events) > 0 {
+				t.Errorf("End after the error frame = %v, %v; want nothing", events, err)
 			}
 		})
 	}

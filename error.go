@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-
-	"github.com/JaimeStill/spike-ai-pipeline-client/format"
 )
 
 // maxErrorText bounds how much of an error body without a message Error prints. It bounds the
@@ -56,10 +54,3 @@ func (e *APIError) Error() string {
 	}
 	return fmt.Sprintf("%s: %s", s, body)
 }
-
-// StreamError is an error frame in a streamed reply: the endpoint failed after GenerateStream's
-// stream began, and said so in the stream, with its message, type, and code. GenerateStream
-// yields it, wrapped, as the sequence's last pair, so callers reach it with errors.As. It is
-// format.StreamError, which the format's stream decoder makes when it decodes the frame, under
-// the client's name beside APIError, the error a reply before the stream gives.
-type StreamError = format.StreamError

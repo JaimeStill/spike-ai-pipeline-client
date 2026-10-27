@@ -329,12 +329,6 @@ func TestGenerateStreamError(t *testing.T) {
 				t.Errorf("error = %v, want io.ErrUnexpectedEOF wrapping the reset", err)
 			}
 		}},
-		{name: "error frame", reply: eventStream(append(streamed[:3:3], errorFrame, streamed[3])...), text: "Paris", check: func(t *testing.T, err error) {
-			var frame *client.StreamError
-			if !errors.As(err, &frame) || *frame != (client.StreamError{Message: "context shift is disabled", Type: "server_error", Code: "500"}) {
-				t.Errorf("error = %#v, want the frame's *StreamError", err)
-			}
-		}},
 		{name: "chunk the format can't decode", reply: eventStream(append(streamed[:3:3], `{"choices":`)...), text: "Paris", check: func(t *testing.T, err error) {
 			if !strings.Contains(err.Error(), "decode chunk") || errors.Is(err, io.ErrUnexpectedEOF) {
 				t.Errorf("error = %v, want the format's decode error", err)
@@ -473,28 +467,49 @@ func TestGenerateStreamConnectionDropped(t *testing.T) {
 	}
 }
 
-// TestGenerateStreamErrorFrame has the server send llama.cpp's error frame mid-stream, and wants
-// the frame's *StreamError, after the events before it, which fold to the partial Response, and
-// nothing of the chunk the server sends after it.
+// TestGenerateStreamErrorFrame has the server send llama.cpp's error frame, mid-stream and as the
+// stream's first event, and wants no error pair: the stream ends as the spec has it, with the
+// error event of the frame's type, code, and message, then response.failed, which folds to the
+// Response failed, holding the frame's error and the output made before it, the message open at
+// it in progress. Nothing of the chunk the server sends after the frame is yielded.
 func TestGenerateStreamErrorFrame(t *testing.T) {
-	srv := clienttest.NewServer(t, http.StatusOK, eventStream(append(streamed[:3:3], errorFrame, streamed[2])...))
-	c := newClient(t, client.Config{BaseURL: srv.URL})
-	_, resp, errs := collect(t, c.GenerateStream(t.Context(), hello()))
-	if len(errs) != 1 {
-		t.Fatalf("GenerateStream errors = %v, want one", errs)
+	payload := protocol.ErrorPayload{Type: "server_error", Code: "500", Message: "context shift is disabled"}
+	cases := []struct {
+		name   string
+		chunks []string
+		// output is the failed Response's.
+		output []protocol.Item
+	}{
+		{"mid-stream", append(streamed[:3:3], errorFrame, streamed[2]), partial("Paris").Output},
+		{"first", []string{errorFrame, streamed[1]}, nil},
 	}
-	var frame *client.StreamError
-	if !errors.As(errs[0], &frame) {
-		t.Fatalf("error = %v, want a *StreamError", errs[0])
-	}
-	if frame.Message != "context shift is disabled" || frame.Type != "server_error" || frame.Code != "500" {
-		t.Errorf("StreamError = %+v, want the frame's message, type, and code", *frame)
-	}
-	if want := "stream error: context shift is disabled (server_error, 500)"; !strings.HasSuffix(errs[0].Error(), want) {
-		t.Errorf("error = %q, want it to end %q", errs[0], want)
-	}
-	if want := partial("Paris"); !reflect.DeepEqual(resp, want) {
-		t.Errorf("Response = %#v\nwant       %#v", resp, want)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := clienttest.NewServer(t, http.StatusOK, eventStream(tc.chunks...))
+			c := newClient(t, client.Config{BaseURL: srv.URL})
+			events, resp, errs := collect(t, c.GenerateStream(t.Context(), hello()))
+			if len(errs) > 0 {
+				t.Fatalf("GenerateStream errors = %v, want none", errs)
+			}
+			if _, ok := events[0].(protocol.ResponseCreated); !ok {
+				t.Errorf("first event = %#v, want response.created", events[0])
+			}
+			n := len(events)
+			if e, ok := events[n-2].(protocol.ErrorEvent); !ok || e.Error != payload {
+				t.Errorf("next to last event = %#v, want the error event of %#v", events[n-2], payload)
+			}
+			if _, ok := events[n-1].(protocol.ResponseFailed); !ok {
+				t.Errorf("last event = %#v, want response.failed", events[n-1])
+			}
+			want := &protocol.Response{
+				Output: tc.output,
+				Status: protocol.StatusFailed,
+				Error:  &protocol.ResponseError{Code: "500", Message: "context shift is disabled"},
+			}
+			if !reflect.DeepEqual(resp, want) {
+				t.Errorf("Response = %#v\nwant       %#v", resp, want)
+			}
+		})
 	}
 }
 

@@ -212,10 +212,21 @@ func (*Format) DecodeError(body []byte) (message, typ, code string) {
 // arrived, where it closes with the terminal event: response.completed or
 // response.incomplete, as the finish_reason gives, its response holding the output and the
 // usage of the chunk that carried it. A stream that ends with no finish_reason is
-// io.ErrUnexpectedEOF; so is [DONE] without one. An error frame, an event whose data is an
-// OpenAI-style error body, {"error": {...}}, as llama.cpp sends when generation fails mid-stream,
-// is a *format.StreamError holding its message, type, and code. A chunk that isn't JSON, an unknown
-// finish_reason, a delta after the finish_reason, or an event after [DONE] is an error. The
+// io.ErrUnexpectedEOF; so is [DONE] without one.
+//
+// An error frame, an event whose data is an OpenAI-style error body, {"error": {...}}, as
+// llama.cpp sends when generation fails mid-stream, is the endpoint's report that the response
+// failed, and closes the stream as the spec has it: the error event, its payload the frame's
+// type, code, message, and param, then the terminal response.failed, its response failed, its
+// error the frame's code and message, holding the output made before the frame and the usage
+// given so far. The item open at the frame gets no done event: it is in the output in progress,
+// with the content or arguments it had, as the Accumulator holds an item still open, since the
+// spec keeps incomplete for an item of an incomplete response and has no failed item status. A
+// frame as the first event follows response.created, which every stream opens with, and an
+// event after the frame is an error, as one after [DONE] is.
+//
+// A chunk that isn't JSON, an unknown finish_reason, a delta after the finish_reason, or an
+// event after [DONE] is an error. The
 // stream's id is its first chunk's, which every chunk repeats; a chunk with another id is an
 // error. Each item's id, its events' item_id, is the one DecodeResponse gives it: itemID derives
 // it from the stream's id and the item's output index, as Chat Completions supplies no item ids.
@@ -327,12 +338,11 @@ func (d *streamDecoder) decode(data []byte) error {
 		// arrived whole.
 		return fmt.Errorf("decode chunk: %v", err)
 	}
-	// An error frame is the endpoint's report that the stream failed, ahead of its end; its body
-	// is an OpenAI-style error's, which DecodeOpenAIError reads.
+	// An error frame is the endpoint's report that the response failed, ahead of its end; its
+	// body is an OpenAI-style error's, which DecodeOpenAIError reads.
 	if len(c.Error) > 0 && c.Error.Kind() != jsontext.KindNull {
-		e := &format.StreamError{}
-		e.Message, e.Type, e.Code = format.DecodeOpenAIError(data)
-		return e
+		d.fail(data, c.Error)
+		return nil
 	}
 	switch {
 	case !d.chunked:
@@ -414,6 +424,60 @@ func (d *streamDecoder) end() error {
 		d.emit(protocol.ResponseCompleted{SequenceNumber: d.next(), Response: resp})
 	} else {
 		d.emit(protocol.ResponseIncomplete{SequenceNumber: d.next(), Response: resp})
+	}
+	return nil
+}
+
+// fail closes the stream at an error frame, data, whose error member is frame, as
+// NewStreamDecoder describes: the error event, then response.failed.
+func (d *streamDecoder) fail(data []byte, frame jsontext.Value) {
+	d.ended = true
+	var payload protocol.ErrorPayload
+	payload.Message, payload.Type, payload.Code = format.DecodeOpenAIError(data)
+	// DecodeOpenAIError reads no param, which the spec's error payload carries; an error of
+	// another shape, or a param that isn't a string, gives none.
+	var param struct {
+		Param string `json:"param"`
+	}
+	if frame.Kind() == jsontext.KindBeginObject {
+		_ = json.Unmarshal(frame, &param)
+	}
+	payload.Param = param.Param
+	d.emit(protocol.ErrorEvent{SequenceNumber: d.next(), Error: payload})
+	output := slices.Clone(d.output)
+	if it := d.openItem(); it != nil {
+		output = append(output, it)
+	}
+	d.emit(protocol.ResponseFailed{SequenceNumber: d.next(), Response: &protocol.Response{
+		Output: output,
+		Status: protocol.StatusFailed,
+		Error:  &protocol.ResponseError{Code: payload.Code, Message: payload.Message},
+		Usage:  d.usage,
+	}})
+}
+
+// openItem returns the item open, in progress, with the content or the arguments made so far,
+// or nil when none is. Items open one at a time, each closing the one before it, so at most one
+// is: a reasoning item of its reasoning_text part, without the encrypted_content its done event
+// gives; the message, of its parts done and the one open; or a function call.
+func (d *streamDecoder) openItem() protocol.Item {
+	switch {
+	case d.reasoning != nil:
+		r := d.reasoning
+		return protocol.Reasoning{ID: r.id, Status: protocol.StatusInProgress, Content: []protocol.ReasoningText{{Text: r.text.String()}}}
+	case d.message != nil:
+		m := d.message
+		content := slices.Clone(m.content)
+		switch m.part {
+		case partText:
+			content = append(content, protocol.OutputText{Text: m.text.String()})
+		case partRefusal:
+			content = append(content, protocol.Refusal{Refusal: m.text.String()})
+		}
+		return protocol.Message{ID: m.id, Status: protocol.StatusInProgress, Role: protocol.RoleAssistant, Content: content}
+	case d.call != nil:
+		c := d.call
+		return protocol.FunctionCall{ID: c.id, Status: protocol.StatusInProgress, CallID: c.callID, Name: c.name, Arguments: c.args.String()}
 	}
 	return nil
 }
