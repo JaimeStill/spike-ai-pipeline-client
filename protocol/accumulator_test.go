@@ -1,6 +1,7 @@
 package protocol_test
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -120,7 +121,8 @@ func TestAccumulatorRefusesEvent(t *testing.T) {
 		{"response.created with no response", 0, protocol.ResponseCreated{}, "no response"},
 		{"response.created with output", 0, protocol.ResponseCreated{Response: &protocol.Response{Output: []protocol.Item{message}}}, "has output"},
 		{"a repeated sequence number", 2, protocol.OutputTextDelta{SequenceNumber: 1, Delta: "x"}, "sequence number 1 doesn't follow 1"},
-		{"an item out of output order", 1, protocol.OutputItemAdded{SequenceNumber: 1, OutputIndex: 1, Item: message}, "output 1 added, want output 0 next"},
+		{"an item at a negative output index", 1, protocol.OutputItemAdded{SequenceNumber: 1, OutputIndex: -1, Item: message}, "output -1 added, want an output index of 0 or more"},
+		{"an item at an output index already added", 2, protocol.OutputItemAdded{SequenceNumber: 2, Item: protocol.Message{ID: "msg_2", Role: protocol.RoleAssistant}}, "output 0 was already added"},
 		{"an item added with content", 1, protocol.OutputItemAdded{SequenceNumber: 1, Item: done}, "added with content"},
 		{"an item of an unsupported type", 1, protocol.OutputItemAdded{SequenceNumber: 1, Item: protocol.FunctionCallOutput{}}, "unsupported item"},
 		{"a part of an item not added", 1, protocol.ContentPartAdded{SequenceNumber: 1, Part: protocol.OutputText{}}, "output 0 wasn't added"},
@@ -303,6 +305,82 @@ func TestAccumulatorFunctionCall(t *testing.T) {
 	}
 }
 
+// twoCallStream is a whole stream of two function calls open at once, added out of output order,
+// call 1 before call 0, their argument deltas interleaved, and done in output order.
+func twoCallStream() []protocol.Event {
+	added := func(n int) protocol.FunctionCall {
+		return protocol.FunctionCall{ID: fmt.Sprintf("r/%d", n), Status: protocol.StatusInProgress, CallID: fmt.Sprintf("c%d", n), Name: "get_weather"}
+	}
+	paris := protocol.FunctionCall{ID: "r/0", Status: protocol.StatusCompleted, CallID: "c0", Name: "get_weather", Arguments: `{"city":"Paris"}`}
+	tokyo := protocol.FunctionCall{ID: "r/1", Status: protocol.StatusCompleted, CallID: "c1", Name: "get_weather", Arguments: `{"city":"Tokyo"}`}
+	return []protocol.Event{
+		protocol.ResponseCreated{SequenceNumber: 0, Response: &protocol.Response{Status: protocol.StatusInProgress}},
+		protocol.OutputItemAdded{SequenceNumber: 1, OutputIndex: 1, Item: added(1)},
+		protocol.FunctionCallArgumentsDelta{SequenceNumber: 2, ItemID: "r/1", OutputIndex: 1, Delta: `{"city":`},
+		protocol.OutputItemAdded{SequenceNumber: 3, OutputIndex: 0, Item: added(0)},
+		protocol.FunctionCallArgumentsDelta{SequenceNumber: 4, ItemID: "r/0", OutputIndex: 0, Delta: `{"city":`},
+		protocol.FunctionCallArgumentsDelta{SequenceNumber: 5, ItemID: "r/1", OutputIndex: 1, Delta: `"Tokyo"}`},
+		protocol.FunctionCallArgumentsDelta{SequenceNumber: 6, ItemID: "r/0", OutputIndex: 0, Delta: `"Paris"}`},
+		protocol.FunctionCallArgumentsDone{SequenceNumber: 7, ItemID: "r/0", OutputIndex: 0, Arguments: paris.Arguments},
+		protocol.OutputItemDone{SequenceNumber: 8, OutputIndex: 0, Item: paris},
+		protocol.FunctionCallArgumentsDone{SequenceNumber: 9, ItemID: "r/1", OutputIndex: 1, Arguments: tokyo.Arguments},
+		protocol.OutputItemDone{SequenceNumber: 10, OutputIndex: 1, Item: tokyo},
+		protocol.ResponseCompleted{SequenceNumber: 11, Response: &protocol.Response{
+			Output: []protocol.Item{paris, tokyo},
+			Status: protocol.StatusCompleted,
+		}},
+	}
+}
+
+// TestAccumulatorItemsOutOfOrder wants items open at once, added out of output order, folded by
+// output index: before the lower index is added the output is the higher alone, then both in
+// output order, each with the arguments its own deltas made, and after the terminal event that
+// event's response.
+func TestAccumulatorItemsOutOfOrder(t *testing.T) {
+	call := func(n int, status protocol.Status, arguments string) protocol.Item {
+		return protocol.FunctionCall{ID: fmt.Sprintf("r/%d", n), Status: status, CallID: fmt.Sprintf("c%d", n), Name: "get_weather", Arguments: arguments}
+	}
+	inProgress := func(output ...protocol.Item) *protocol.Response {
+		return &protocol.Response{Status: protocol.StatusInProgress, Output: output}
+	}
+	events := twoCallStream()
+	cases := []struct {
+		events int
+		want   *protocol.Response
+	}{
+		{3, inProgress(call(1, protocol.StatusInProgress, `{"city":`))},
+		{4, inProgress(call(0, protocol.StatusInProgress, ""), call(1, protocol.StatusInProgress, `{"city":`))},
+		{7, inProgress(call(0, protocol.StatusInProgress, `{"city":"Paris"}`), call(1, protocol.StatusInProgress, `{"city":"Tokyo"}`))},
+		{9, inProgress(call(0, protocol.StatusCompleted, `{"city":"Paris"}`), call(1, protocol.StatusInProgress, `{"city":"Tokyo"}`))},
+		{12, events[11].(protocol.ResponseCompleted).Response},
+	}
+	for _, tc := range cases {
+		var acc protocol.Accumulator
+		add(t, &acc, twoCallStream()[:tc.events])
+		if got := acc.Response(); !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("after %d events, Response = %#v\nwant %#v", tc.events, got, tc.want)
+		}
+	}
+}
+
+// TestAccumulatorRefusesGapAtTheEnd wants response.completed refused while an output index below
+// the highest added wasn't added, every item added being done.
+func TestAccumulatorRefusesGapAtTheEnd(t *testing.T) {
+	tokyo := twoCallStream()[10].(protocol.OutputItemDone).Item
+	var acc protocol.Accumulator
+	add(t, &acc, []protocol.Event{
+		protocol.ResponseCreated{SequenceNumber: 0, Response: &protocol.Response{Status: protocol.StatusInProgress}},
+		protocol.OutputItemAdded{SequenceNumber: 1, OutputIndex: 1, Item: protocol.FunctionCall{ID: "r/1", Status: protocol.StatusInProgress, CallID: "c1", Name: "get_weather"}},
+		protocol.FunctionCallArgumentsDelta{SequenceNumber: 2, ItemID: "r/1", OutputIndex: 1, Delta: `{"city":"Tokyo"}`},
+		protocol.FunctionCallArgumentsDone{SequenceNumber: 3, ItemID: "r/1", OutputIndex: 1, Arguments: `{"city":"Tokyo"}`},
+		protocol.OutputItemDone{SequenceNumber: 4, OutputIndex: 1, Item: tokyo},
+	})
+	err := acc.Add(protocol.ResponseCompleted{SequenceNumber: 5, Response: &protocol.Response{Output: []protocol.Item{tokyo}, Status: protocol.StatusCompleted}})
+	if err == nil || !strings.Contains(err.Error(), "output 0 wasn't added") {
+		t.Errorf("Add(response.completed) = %v, want an error containing %q", err, "output 0 wasn't added")
+	}
+}
+
 // TestAccumulatorRefusesArgumentsEvent covers the function call events that don't follow the
 // events before them: arguments events out of order, of another item, and arguments the deltas
 // didn't make. Each case folds the first n events of callStream, then wants e refused, and the
@@ -445,7 +523,7 @@ func TestAccumulatorRefusesReasoningEvent(t *testing.T) {
 		{"a reasoning item done of another id", 7, protocol.OutputItemDone{SequenceNumber: 7, Item: protocol.Reasoning{ID: "r/9", Content: reasoning.Content}}, `reasoning item "r/9" is done where reasoning item "r/0" was added`},
 		{"a reasoning item done as a message", 7, protocol.OutputItemDone{SequenceNumber: 7, Item: protocol.Message{ID: "r/0"}}, "where a reasoning item was added"},
 		{"a function call done where reasoning was added", 7, protocol.OutputItemDone{SequenceNumber: 7, Item: protocol.FunctionCall{ID: "r/0"}}, "where a reasoning item was added"},
-		{"a message added at the reasoning item's output index", 7, protocol.OutputItemAdded{SequenceNumber: 7, OutputIndex: 0, Item: protocol.Message{ID: "r/1", Role: protocol.RoleAssistant}}, "output 0 added, want output 1 next"},
+		{"a message added at the reasoning item's output index", 7, protocol.OutputItemAdded{SequenceNumber: 7, OutputIndex: 0, Item: protocol.Message{ID: "r/1", Role: protocol.RoleAssistant}}, "output 0 was already added"},
 		{"response.completed with the reasoning item open", 7, protocol.ResponseCompleted{SequenceNumber: 7, Response: &protocol.Response{Output: []protocol.Item{reasoning}}}, "output 0 isn't done"},
 	}
 	for _, tc := range cases {

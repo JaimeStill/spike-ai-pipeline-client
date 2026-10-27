@@ -13,14 +13,22 @@ import (
 // output so far, the items not yet done, and the parts not yet done, in StatusInProgress, so a
 // stream that breaks leaves the partial output.
 //
+// Items may be open at once, and may be added in any order of output index: each event names its
+// item by output_index and item_id, and sequence_number orders the events, as the spec has it,
+// with no rule that an item is done before the next is added or that items are added in output
+// order. An item is placed at its output_index; the output folded so far is the items added, in
+// output order, any index not yet added left out.
+//
 // Add refuses an event that doesn't follow the events before it: anything before
 // response.created or after a terminal event, a sequence number that doesn't increase, an item
-// added under the id of one added before it, an event about an item or part that wasn't added or
+// added at a negative output index or at one already added, an item added under the id of one
+// added before it, an event about an item or part that wasn't added or
 // is already done, an item_id that isn't the id of the item at the event's output_index, a part
 // added before the one ahead of it is done, an item done before its parts, or a function call's
 // arguments, are done, a done event whose text, arguments, or content isn't what the deltas made,
-// and a terminal response.completed or response.incomplete while an item is open or after an
-// error event. A refused event changes nothing.
+// and a terminal response.completed or response.incomplete while an item is open, while an output
+// index below the highest added wasn't added, or after an error event. A refused event changes
+// nothing.
 //
 // An error event, the server's report that the response failed, changes nothing of the response:
 // the response.failed that follows it carries the failure, in its Response's Error, and that
@@ -40,12 +48,14 @@ type Accumulator struct {
 	seq int
 	// resp is the created response, and then the terminal one.
 	resp Response
-	// items are the output items added, in output order.
+	// items are the output items added, in output order, which may skip an index not yet added.
 	items []*foldItem
 }
 
 // foldItem is an output item being folded.
 type foldItem struct {
+	// output is the item's output index.
+	output int
 	// item is the item as added, and then as done.
 	item Item
 	done bool
@@ -178,7 +188,10 @@ func (a *Accumulator) end(r *Response, closed bool) error {
 			return errors.New("the stream reported an error, want response.failed")
 		}
 		for i, it := range a.items {
-			if !it.done {
+			switch {
+			case it.output != i:
+				return fmt.Errorf("output %d wasn't added", i)
+			case !it.done:
 				return fmt.Errorf("output %d isn't done", i)
 			}
 		}
@@ -191,11 +204,16 @@ func (a *Accumulator) end(r *Response, closed bool) error {
 	return nil
 }
 
-// addItem folds an output_item.added: the next item in output order, a message with no content,
-// a reasoning item with no content or encrypted content, or a function call with no arguments.
+// addItem folds an output_item.added: an item at an output index not yet added, a message with
+// no content, a reasoning item with no content or encrypted content, or a function call with no
+// arguments.
 func (a *Accumulator) addItem(e OutputItemAdded) error {
-	if e.OutputIndex != len(a.items) {
-		return fmt.Errorf("output %d added, want output %d next", e.OutputIndex, len(a.items))
+	at, found := a.find(e.OutputIndex)
+	switch {
+	case e.OutputIndex < 0:
+		return fmt.Errorf("output %d added, want an output index of 0 or more", e.OutputIndex)
+	case found:
+		return fmt.Errorf("output %d was already added", e.OutputIndex)
 	}
 	var id string
 	switch it := e.Item.(type) {
@@ -220,14 +238,22 @@ func (a *Accumulator) addItem(e OutputItemAdded) error {
 	// Items are found by output index, which every event about one carries, and their ids
 	// checked against it; an empty id, from a format with none to give, is never a repeat.
 	if id != "" {
-		for i, it := range a.items {
+		for _, it := range a.items {
 			if itemID(it.item) == id {
-				return fmt.Errorf("item %q is already output %d", id, i)
+				return fmt.Errorf("item %q is already output %d", id, it.output)
 			}
 		}
 	}
-	a.items = append(a.items, &foldItem{item: e.Item})
+	a.items = slices.Insert(a.items, at, &foldItem{output: e.OutputIndex, item: e.Item})
 	return nil
+}
+
+// find returns the place in a.items of the item at output, and whether it was added; when it
+// wasn't, the place is where it goes.
+func (a *Accumulator) find(output int) (int, bool) {
+	return slices.BinarySearchFunc(a.items, output, func(it *foldItem, output int) int {
+		return it.output - output
+	})
 }
 
 // doneItem folds an output_item.done: the whole item, the one added there, a message's or a
@@ -364,13 +390,14 @@ func (a *Accumulator) doneText(itemID string, output, content int, kind ContentP
 
 // item returns the output item at output, added and not done.
 func (a *Accumulator) item(output int) (*foldItem, error) {
+	i, found := a.find(output)
 	switch {
-	case output < 0 || output >= len(a.items):
+	case !found:
 		return nil, fmt.Errorf("output %d wasn't added", output)
-	case a.items[output].done:
+	case a.items[i].done:
 		return nil, fmt.Errorf("output %d is done", output)
 	}
-	return a.items[output], nil
+	return a.items[i], nil
 }
 
 // contentItem returns the output item at output, added, not done, and a message or a reasoning
@@ -495,8 +522,9 @@ func sameKind(p, kind ContentPart) bool {
 
 // Response returns the response folded so far, a new value each call. After a terminal event it
 // is that event's Response. Before one it is the created Response, in StatusInProgress, holding
-// the output so far: each item done as it was done, and each item still open with the content, or
-// the arguments, its events have made, in StatusInProgress. A reasoning item still open has no
+// the output so far, in output order, an index not yet added left out: each item done as it was
+// done, and each item still open with the content, or the arguments, its events have made, in
+// StatusInProgress. A reasoning item still open has no
 // encrypted content, which its format gives only at its done event. Before response.created it is
 // empty.
 func (a *Accumulator) Response() *Response {
