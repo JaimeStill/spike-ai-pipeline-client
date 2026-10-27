@@ -6,6 +6,44 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 
 ## [Unreleased]
 
+## [v0.3.0] - 2026-10-27
+
+### Added
+
+- `format/messages`, the Anthropic Messages format (`/messages`), built with `messages.New()` as
+  `client.Config`'s `Format`. It speaks API version 2026-10-21, which every request names in its
+  `anthropic-version` header, and targets Anthropic's API and the endpoints compatible with it,
+  such as llama.cpp's router. It sends `MaxOutputTokens` as `max_tokens`, which Messages
+  requires, so a request with no `MaxOutputTokens` is refused; instructions as the top-level
+  `system`; a system or developer message as a system message where it stands; an assistant
+  run as one assistant message of thinking, text, and `tool_use` blocks; a function call's
+  output as a `tool_result` block leading its user message; images as image blocks of a base64
+  or url source; tools as custom tools with `input_schema`; the tool choice as `tool_choice`,
+  an `allowed_tools` choice sending only the tools it allows; reasoning effort none as thinking
+  disabled and any other as adaptive thinking with `output_config.effort`; and a JSON-schema
+  text format as `output_config.format`. The native tier merges into the body's top level as
+  in Chat Completions, a clashing member refused. Audio input has no Messages form and is
+  refused.
+- The hints Messages has no form for are dropped, never refused: an image's detail, text's
+  verbosity, and a JSON-schema format's name, description, and strict flag.
+- Reasoning through Messages: `DecodeResponse` makes a reasoning item of each thinking or
+  redacted_thinking block, its `encrypted_content` the format's envelope,
+  `spike-ai-pipeline:messages/v1:` and base64 of the block's `{"thinking","signature"}` or
+  `{"data"}`, which goes back as the block it came from. A reasoning item whose
+  `encrypted_content` isn't this envelope, such as Chat Completions', is dropped on encode,
+  never an error, so a conversation can carry another format's reasoning through this one.
+- `DecodeResponse` decodes a Messages reply's text, `tool_use`, thinking, and
+  redacted_thinking blocks into reasoning, messages, and function calls, its `stop_reason` into
+  the status and `IncompleteDetails`, `pause_turn` an error as a stateless response has no place
+  for it, and its usage, the prompt cache's reads and writes counted in the input tokens.
+  `DecodeError` decodes Anthropic's error body and llama.cpp's OpenAI-style one, both with
+  `format.DecodeOpenAIError`.
+- Streaming in `format/messages`: `EncodeStreamRequest` sends `stream` true, and the stream
+  decoder turns a Messages stream into the spec's events, whose folded Response is
+  `DecodeResponse`'s for the same reply. It takes content blocks open at once, as llama.cpp's
+  router stops every block only at the end of the reply, and an error frame in Anthropic's
+  shape or llama.cpp's ends the stream with the error event and `response.failed`.
+
 ## [v0.2.0] - 2026-10-27
 
 ### Added
@@ -146,6 +184,7 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
   memory, and `Transcribe` returns only once it has stopped reading it. The reply carries no
   timestamps.
 
-[Unreleased]: https://github.com/JaimeStill/spike-ai-pipeline-client/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/JaimeStill/spike-ai-pipeline-client/compare/v0.3.0...HEAD
+[v0.3.0]: https://github.com/JaimeStill/spike-ai-pipeline-client/compare/v0.2.0...v0.3.0
 [v0.2.0]: https://github.com/JaimeStill/spike-ai-pipeline-client/compare/v0.1.0...v0.2.0
 [v0.1.0]: https://github.com/JaimeStill/spike-ai-pipeline-client/releases/tag/v0.1.0

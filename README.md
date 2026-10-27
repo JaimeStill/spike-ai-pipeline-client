@@ -5,9 +5,9 @@ Go primitives over the inference engines' native APIs, built under go-elemental 
 optimized infrastructure, on the standard library alone. It is four layers, importing one way:
 `protocol`, the request and response model, Open Responses (spec 2026-04-24) in its stateless
 subset with client extensions; `format`, the contract a wire format meets; a package per wire
-format below it, Chat Completions (`format/completions`) first, then Anthropic Messages and Open
-Responses; and the module root, the transport, which speaks the format chosen by constructor at
-the composition root.
+format below it, Chat Completions (`format/completions`) and Anthropic Messages
+(`format/messages`), with Open Responses to come; and the module root, the transport, which speaks
+the format chosen by constructor at the composition root.
 
 It has four operations: `Generate`, chat with text, image, and audio parts, tools, structured
 output, and reasoning; `GenerateStream`, the same request streamed; `Embed`; and `Transcribe`.
@@ -27,6 +27,28 @@ resp, err := c.Generate(ctx, &protocol.Request{
 		Role:    protocol.RoleUser,
 		Content: []protocol.ContentPart{protocol.InputText{Text: "Capital of France?"}},
 	}},
+})
+```
+
+The format is the Config's `Format`, and the same request goes out in either. `completions.New()`
+speaks Chat Completions, `/chat/completions`, the OpenAI-compatible shape. `messages.New()` speaks
+Anthropic Messages, `/messages`, at API version 2026-10-21, which every request names in its
+`anthropic-version` header; it targets Anthropic's API and the endpoints compatible with it, such
+as llama.cpp's router. Messages requires `max_tokens`, so it refuses a request with no
+`MaxOutputTokens`, and it refuses audio input, which it has no form for. The hints it has no form
+for are dropped, never refused: an image's detail, text's verbosity, and a JSON-schema format's
+name, description, and strict flag. A reasoning item goes back to the format that wrote it through
+its `encrypted_content`, and one another format wrote is dropped, so a conversation can move from
+one format to the other. llama.cpp's router reads less of a Messages body than Anthropic's API
+does: it drops reasoning effort's level and structured output's schema, and a named or none tool
+choice reaches the model as any or none at all; the `format/messages` package documentation
+lists what it drops.
+
+```go
+c, err := client.New(client.Config{
+	BaseURL: "http://localhost:8080/v1",
+	HTTP:    http.DefaultClient,
+	Format:  messages.New(),
 })
 ```
 
