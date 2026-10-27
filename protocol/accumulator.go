@@ -22,8 +22,10 @@ import (
 // and a terminal response.completed or response.incomplete while an item is open. A refused event
 // changes nothing.
 //
-// It folds message items, of output_text and refusal parts, and function_call items, of argument
-// deltas. Its zero value is ready to use; it isn't safe for concurrent use.
+// It folds message items, of output_text and refusal parts, reasoning items, of reasoning_text
+// parts, and function_call items, of argument deltas. A done reasoning item's encrypted content
+// and summary are its format's, which no event streams, so it takes them as the done event
+// gives them. Its zero value is ready to use; it isn't safe for concurrent use.
 type Accumulator struct {
 	created, ended bool
 	// seq is the sequence number of the last event added.
@@ -39,15 +41,15 @@ type foldItem struct {
 	// item is the item as added, and then as done.
 	item Item
 	done bool
-	// parts are a message's content parts, in order.
+	// parts are a message's or a reasoning item's content parts, in order.
 	parts []*foldPart
 	// args is a function call's arguments so far, and argsDone is set at their done event.
 	args     strings.Builder
 	argsDone bool
 }
 
-// foldPart is a content part being folded: an OutputText or a Refusal, as added, and its text
-// so far.
+// foldPart is a content part being folded: an OutputText, a Refusal, or a ReasoningText, as
+// added, and its text so far.
 type foldPart struct {
 	part ContentPart
 	text strings.Builder
@@ -123,21 +125,17 @@ func (a *Accumulator) fold(e Event) error {
 		}
 		p.done = true
 	case OutputTextDelta:
-		p, err := a.textPart(e.ItemID, e.OutputIndex, e.ContentIndex, false)
-		if err != nil {
-			return err
-		}
-		p.text.WriteString(e.Delta)
+		return a.deltaText(e.ItemID, e.OutputIndex, e.ContentIndex, OutputText{}, e.Delta)
 	case OutputTextDone:
-		return a.doneText(e.ItemID, e.OutputIndex, e.ContentIndex, false, e.Text)
+		return a.doneText(e.ItemID, e.OutputIndex, e.ContentIndex, OutputText{}, e.Text)
 	case RefusalDelta:
-		p, err := a.textPart(e.ItemID, e.OutputIndex, e.ContentIndex, true)
-		if err != nil {
-			return err
-		}
-		p.text.WriteString(e.Delta)
+		return a.deltaText(e.ItemID, e.OutputIndex, e.ContentIndex, Refusal{}, e.Delta)
 	case RefusalDone:
-		return a.doneText(e.ItemID, e.OutputIndex, e.ContentIndex, true, e.Refusal)
+		return a.doneText(e.ItemID, e.OutputIndex, e.ContentIndex, Refusal{}, e.Refusal)
+	case ReasoningDelta:
+		return a.deltaText(e.ItemID, e.OutputIndex, e.ContentIndex, ReasoningText{}, e.Delta)
+	case ReasoningDone:
+		return a.doneText(e.ItemID, e.OutputIndex, e.ContentIndex, ReasoningText{}, e.Text)
 	case FunctionCallArgumentsDelta:
 		it, err := a.functionCall(e.ItemID, e.OutputIndex)
 		if err != nil {
@@ -178,8 +176,8 @@ func (a *Accumulator) end(r *Response, closed bool) error {
 	return nil
 }
 
-// addItem folds an output_item.added: the next item in output order, a message with no content
-// or a function call with no arguments.
+// addItem folds an output_item.added: the next item in output order, a message with no content,
+// a reasoning item with no content or encrypted content, or a function call with no arguments.
 func (a *Accumulator) addItem(e OutputItemAdded) error {
 	if e.OutputIndex != len(a.items) {
 		return fmt.Errorf("output %d added, want output %d next", e.OutputIndex, len(a.items))
@@ -189,6 +187,11 @@ func (a *Accumulator) addItem(e OutputItemAdded) error {
 	case Message:
 		if len(it.Content) > 0 {
 			return errors.New("the message is added with content")
+		}
+		id = it.ID
+	case Reasoning:
+		if len(it.Content) > 0 || it.EncryptedContent != "" {
+			return errors.New("the reasoning item is added with content")
 		}
 		id = it.ID
 	case FunctionCall:
@@ -212,9 +215,9 @@ func (a *Accumulator) addItem(e OutputItemAdded) error {
 	return nil
 }
 
-// doneItem folds an output_item.done: the whole item, the one added there, a message's parts done
-// and its content what they made, or a function call's arguments done and what their deltas
-// made.
+// doneItem folds an output_item.done: the whole item, the one added there, a message's or a
+// reasoning item's parts done and its content what they made, or a function call's arguments
+// done and what their deltas made.
 func (a *Accumulator) doneItem(e OutputItemDone) error {
 	it, err := a.item(e.OutputIndex)
 	if err != nil {
@@ -228,16 +231,24 @@ func (a *Accumulator) doneItem(e OutputItemDone) error {
 			return fmt.Errorf("item %T is done where a message was added", e.Item)
 		case m.ID != added.ID || m.Role != added.Role:
 			return fmt.Errorf("message %q of role %s is done where message %q of role %s was added", m.ID, m.Role, added.ID, added.Role)
-		case len(m.Content) != len(it.parts):
-			return fmt.Errorf("the message has %d content parts, want the %d streamed", len(m.Content), len(it.parts))
 		}
-		for i, p := range it.parts {
-			if !p.done {
-				return fmt.Errorf("content %d isn't done", i)
-			}
-			if !samePart(m.Content[i], p.folded()) {
-				return fmt.Errorf("content %d %#v isn't the part streamed, %#v", i, m.Content[i], p.folded())
-			}
+		if err := it.doneParts(m.Content); err != nil {
+			return err
+		}
+	case Reasoning:
+		r, ok := e.Item.(Reasoning)
+		switch {
+		case !ok:
+			return fmt.Errorf("item %T is done where a reasoning item was added", e.Item)
+		case r.ID != added.ID:
+			return fmt.Errorf("reasoning item %q is done where reasoning item %q was added", r.ID, added.ID)
+		}
+		content := make([]ContentPart, len(r.Content))
+		for i, p := range r.Content {
+			content[i] = p
+		}
+		if err := it.doneParts(content); err != nil {
+			return err
 		}
 	case FunctionCall:
 		c, ok := e.Item.(FunctionCall)
@@ -256,10 +267,27 @@ func (a *Accumulator) doneItem(e OutputItemDone) error {
 	return nil
 }
 
+// doneParts checks content, a done item's, against the parts it streamed: each done, and each
+// the part its events made.
+func (it *foldItem) doneParts(content []ContentPart) error {
+	if len(content) != len(it.parts) {
+		return fmt.Errorf("the item has %d content parts, want the %d streamed", len(content), len(it.parts))
+	}
+	for i, p := range it.parts {
+		if !p.done {
+			return fmt.Errorf("content %d isn't done", i)
+		}
+		if !samePart(content[i], p.folded()) {
+			return fmt.Errorf("content %d %#v isn't the part streamed, %#v", i, content[i], p.folded())
+		}
+	}
+	return nil
+}
+
 // addPart folds a content_part.added: the item's next part, once the one ahead of it is done, an
-// OutputText or a Refusal of a message.
+// OutputText or a Refusal of a message, or a ReasoningText of a reasoning item.
 func (a *Accumulator) addPart(e ContentPartAdded) error {
-	it, err := a.message(e.ItemID, e.OutputIndex)
+	it, err := a.contentItem(e.ItemID, e.OutputIndex)
 	if err != nil {
 		return err
 	}
@@ -269,12 +297,24 @@ func (a *Accumulator) addPart(e ContentPartAdded) error {
 	case len(it.parts) > 0 && !it.parts[len(it.parts)-1].done:
 		return fmt.Errorf("content %d isn't done", len(it.parts)-1)
 	}
+	_, reasoning := it.item.(Reasoning)
 	p := &foldPart{part: e.Part}
 	switch part := e.Part.(type) {
 	case OutputText:
+		if reasoning {
+			return fmt.Errorf("unsupported part %T of a reasoning item", e.Part)
+		}
 		p.text.WriteString(part.Text)
 	case Refusal:
+		if reasoning {
+			return fmt.Errorf("unsupported part %T of a reasoning item", e.Part)
+		}
 		p.text.WriteString(part.Refusal)
+	case ReasoningText:
+		if !reasoning {
+			return fmt.Errorf("unsupported part %T of a message", e.Part)
+		}
+		p.text.WriteString(part.Text)
 	default:
 		return fmt.Errorf("unsupported part %T", e.Part)
 	}
@@ -282,10 +322,21 @@ func (a *Accumulator) addPart(e ContentPartAdded) error {
 	return nil
 }
 
-// doneText folds an output_text.done, or a refusal.done when refusal is set: the part's whole
-// text, which its deltas made.
-func (a *Accumulator) doneText(itemID string, output, content int, refusal bool, text string) error {
-	p, err := a.textPart(itemID, output, content, refusal)
+// deltaText folds an output_text.delta, a refusal.delta, or a reasoning.delta, of the part of
+// kind's type: delta appended to the part's text.
+func (a *Accumulator) deltaText(itemID string, output, content int, kind ContentPart, delta string) error {
+	p, err := a.textPart(itemID, output, content, kind)
+	if err != nil {
+		return err
+	}
+	p.text.WriteString(delta)
+	return nil
+}
+
+// doneText folds an output_text.done, a refusal.done, or a reasoning.done, of the part of kind's
+// type: the part's whole text, which its deltas made.
+func (a *Accumulator) doneText(itemID string, output, content int, kind ContentPart, text string) error {
+	p, err := a.textPart(itemID, output, content, kind)
 	if err != nil {
 		return err
 	}
@@ -307,19 +358,20 @@ func (a *Accumulator) item(output int) (*foldItem, error) {
 	return a.items[output], nil
 }
 
-// message returns the output item at output, added, not done, and a message whose id is
-// itemID.
-func (a *Accumulator) message(itemID string, output int) (*foldItem, error) {
+// contentItem returns the output item at output, added, not done, and a message or a reasoning
+// item, an item of content parts, whose id is id.
+func (a *Accumulator) contentItem(id string, output int) (*foldItem, error) {
 	it, err := a.item(output)
 	if err != nil {
 		return nil, err
 	}
-	m, ok := it.item.(Message)
-	switch {
-	case !ok:
-		return nil, fmt.Errorf("output %d is %T, not a message", output, it.item)
-	case m.ID != itemID:
-		return nil, fmt.Errorf("output %d is item %q, not %q", output, m.ID, itemID)
+	switch it.item.(type) {
+	case Message, Reasoning:
+	default:
+		return nil, fmt.Errorf("output %d is %T, not a message or a reasoning item", output, it.item)
+	}
+	if got := itemID(it.item); got != id {
+		return nil, fmt.Errorf("output %d is item %q, not %q", output, got, id)
 	}
 	return it, nil
 }
@@ -343,9 +395,10 @@ func (a *Accumulator) functionCall(itemID string, output int) (*foldItem, error)
 	return it, nil
 }
 
-// part returns the content part at content of the message at output, added and not done.
+// part returns the content part at content of the message or reasoning item at output, added and
+// not done.
 func (a *Accumulator) part(itemID string, output, content int) (*foldPart, error) {
-	it, err := a.message(itemID, output)
+	it, err := a.contentItem(itemID, output)
 	if err != nil {
 		return nil, err
 	}
@@ -358,14 +411,14 @@ func (a *Accumulator) part(itemID string, output, content int) (*foldPart, error
 	return it.parts[content], nil
 }
 
-// textPart returns the part at content of the message at output, whose text is still open: a
-// Refusal when refusal is set, and an OutputText otherwise.
-func (a *Accumulator) textPart(itemID string, output, content int, refusal bool) (*foldPart, error) {
+// textPart returns the part at content of the message or reasoning item at output, whose text is
+// still open, and whose type is kind's.
+func (a *Accumulator) textPart(itemID string, output, content int, kind ContentPart) (*foldPart, error) {
 	p, err := a.part(itemID, output, content)
 	if err != nil {
 		return nil, err
 	}
-	if _, isRefusal := p.part.(Refusal); isRefusal != refusal {
+	if !sameKind(p.part, kind) {
 		return nil, fmt.Errorf("output %d content %d is %T", output, content, p.part)
 	}
 	if p.textDone {
@@ -379,6 +432,8 @@ func itemID(it Item) string {
 	switch it := it.(type) {
 	case Message:
 		return it.ID
+	case Reasoning:
+		return it.ID
 	case FunctionCall:
 		return it.ID
 	}
@@ -387,26 +442,47 @@ func itemID(it Item) string {
 
 // folded is the part its events have made so far.
 func (p *foldPart) folded() ContentPart {
-	if _, ok := p.part.(Refusal); ok {
+	switch p.part.(type) {
+	case Refusal:
 		return Refusal{Refusal: p.text.String()}
+	case ReasoningText:
+		return ReasoningText{Text: p.text.String()}
 	}
 	return OutputText{Text: p.text.String()}
 }
 
-// samePart reports whether got is want, an OutputText or a Refusal. It compares only those, so
-// a part of another type, which may not be comparable, is never compared.
+// samePart reports whether got is want, an OutputText, a Refusal, or a ReasoningText. It compares
+// only those, so a part of another type, which may not be comparable, is never compared.
 func samePart(got, want ContentPart) bool {
 	switch got.(type) {
-	case OutputText, Refusal:
+	case OutputText, Refusal, ReasoningText:
 		return got == want
+	}
+	return false
+}
+
+// sameKind reports whether p and kind are parts of one type, an OutputText, a Refusal, or a
+// ReasoningText.
+func sameKind(p, kind ContentPart) bool {
+	switch p.(type) {
+	case OutputText:
+		_, ok := kind.(OutputText)
+		return ok
+	case Refusal:
+		_, ok := kind.(Refusal)
+		return ok
+	case ReasoningText:
+		_, ok := kind.(ReasoningText)
+		return ok
 	}
 	return false
 }
 
 // Response returns the response folded so far, a new value each call. After a terminal event it
 // is that event's Response. Before one it is the created Response, in StatusInProgress, holding
-// the output so far: each item done as it was done, and each item still open in
-// StatusInProgress with the content, or the arguments, its events have made. Before
+// the output so far: each item done as it was done, and each item still open with the content, or
+// the arguments, its events have made, in StatusInProgress when it has a status. A reasoning item
+// still open has no encrypted content, which its format gives only at its done event. Before
 // response.created it is empty.
 func (a *Accumulator) Response() *Response {
 	r := a.resp
@@ -426,6 +502,12 @@ func (a *Accumulator) Response() *Response {
 			item.Content = nil
 			for _, p := range it.parts {
 				item.Content = append(item.Content, p.folded())
+			}
+			r.Output = append(r.Output, item)
+		case Reasoning:
+			item.Content = nil
+			for _, p := range it.parts {
+				item.Content = append(item.Content, p.folded().(ReasoningText))
 			}
 			r.Output = append(r.Output, item)
 		case FunctionCall:
@@ -465,6 +547,10 @@ func describe(e Event) (name string, seq int, ok bool) {
 		return "response.refusal.delta", e.SequenceNumber, true
 	case RefusalDone:
 		return "response.refusal.done", e.SequenceNumber, true
+	case ReasoningDelta:
+		return "response.reasoning.delta", e.SequenceNumber, true
+	case ReasoningDone:
+		return "response.reasoning.done", e.SequenceNumber, true
 	case FunctionCallArgumentsDelta:
 		return "response.function_call_arguments.delta", e.SequenceNumber, true
 	case FunctionCallArgumentsDone:

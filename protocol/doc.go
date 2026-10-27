@@ -15,9 +15,11 @@
 // state events response.created and the terminal response.completed, response.incomplete, and
 // response.failed; the item events response.output_item.added and .done; the part events
 // response.content_part.added and .done; the text events response.output_text.delta and .done,
-// and response.refusal.delta and .done; and the argument events
+// response.refusal.delta and .done, and response.reasoning.delta and .done, the last of a
+// Reasoning item's reasoning_text part; and the argument events
 // response.function_call_arguments.delta and .done. It leaves out response.queued and
-// response.in_progress, reasoning summary events, output_text annotations, and logprobs.
+// response.in_progress, reasoning summary events, output_text annotations, logprobs, and the
+// deltas' obfuscation padding.
 //
 // # Client extensions
 //
@@ -60,7 +62,7 @@
 //   - [Message] is a message item: content parts from a role.
 //   - [Role] is a message's author: [RoleUser], [RoleSystem], [RoleDeveloper], or
 //     [RoleAssistant].
-//   - [ContentPart] is a part of a message's content, a closed set.
+//   - [ContentPart] is a part of a message's content, or of a reasoning item's, a closed set.
 //   - [InputText] is text input, input_text.
 //   - [InputImage] is image input, input_image, by URL or data URL.
 //   - [ImageDetail] is an image's detail level: [ImageDetailAuto], [ImageDetailLow], or
@@ -97,6 +99,8 @@
 //   - [OutputTextDone] is response.output_text.done, an output_text part's whole text.
 //   - [RefusalDelta] is response.refusal.delta, text appended to a refusal part.
 //   - [RefusalDone] is response.refusal.done, a refusal part's whole text.
+//   - [ReasoningDelta] is response.reasoning.delta, text appended to a reasoning_text part.
+//   - [ReasoningDone] is response.reasoning.done, a reasoning_text part's whole text.
 //   - [FunctionCallArgumentsDelta] is response.function_call_arguments.delta, argument text
 //     appended to a function_call item.
 //   - [FunctionCallArgumentsDone] is response.function_call_arguments.done, a function_call

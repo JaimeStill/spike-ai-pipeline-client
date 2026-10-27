@@ -47,8 +47,9 @@ const (
 	RoleAssistant Role = "assistant"
 )
 
-// ContentPart is one part of a message's content. The set is closed: the part types are this
-// package's, and a part is one of them by value, such as InputText.
+// ContentPart is one part of an item's content: of a message's, or ReasoningText, of a reasoning
+// item's, which the spec's content part events carry beside a message's parts. The set is closed:
+// the part types are this package's, and a part is one of them by value, such as InputText.
 type ContentPart interface {
 	contentPart()
 }
@@ -212,11 +213,14 @@ type Reasoning struct {
 func (Reasoning) item() {}
 
 // ReasoningText is reasoning the model produced: reasoning_text, a part of a Reasoning item's
-// Content. It is held there alone, so it isn't a ContentPart.
+// Content. It is a ContentPart so the content part events of a streamed reasoning item can carry
+// it, as the spec's do, but a message never holds it: Validate refuses it there.
 type ReasoningText struct {
 	// Text is the reasoning.
 	Text string
 }
+
+func (ReasoningText) contentPart() {}
 
 // SummaryText is a summary of the model's reasoning: summary_text, a part of a Reasoning
 // item's Summary. It is held there alone, so it isn't a ContentPart.

@@ -175,6 +175,9 @@ func TestValidateRefuses(t *testing.T) {
 		{"input part from assistant", with(func(r *protocol.Request) {
 			r.Input = []protocol.Item{protocol.Message{Role: protocol.RoleAssistant, Content: []protocol.ContentPart{protocol.InputText{Text: "hi"}}}}
 		}), "unsupported part protocol.InputText"},
+		{"reasoning_text in a message", with(func(r *protocol.Request) {
+			r.Input = []protocol.Item{protocol.Message{Role: protocol.RoleAssistant, Content: []protocol.ContentPart{protocol.ReasoningText{Text: "hm"}}}}
+		}), "assistant message content 0: unsupported part protocol.ReasoningText"},
 		{"image from system", with(func(r *protocol.Request) {
 			r.Input = []protocol.Item{protocol.Message{Role: protocol.RoleSystem, Content: []protocol.ContentPart{image}}}
 		}), "system message content 0: unsupported part protocol.InputImage"},

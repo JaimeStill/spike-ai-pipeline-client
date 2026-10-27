@@ -303,3 +303,114 @@ func TestAccumulatorRefusesArgumentsEvent(t *testing.T) {
 		})
 	}
 }
+
+// reasoningStream is a whole stream of a reasoning item, a reasoning_text part of "Hm, Paris." in
+// two deltas, then a message of "Paris", ending with response.completed.
+func reasoningStream() []protocol.Event {
+	reasoning := protocol.Reasoning{ID: "r/0", Content: []protocol.ReasoningText{{Text: "Hm, Paris."}}, EncryptedContent: "sealed"}
+	msg := protocol.Message{ID: "r/1", Status: protocol.StatusCompleted, Role: protocol.RoleAssistant, Content: []protocol.ContentPart{protocol.OutputText{Text: "Paris"}}}
+	return []protocol.Event{
+		protocol.ResponseCreated{SequenceNumber: 0, Response: &protocol.Response{Status: protocol.StatusInProgress}},
+		protocol.OutputItemAdded{SequenceNumber: 1, Item: protocol.Reasoning{ID: "r/0"}},
+		protocol.ContentPartAdded{SequenceNumber: 2, ItemID: "r/0", Part: protocol.ReasoningText{}},
+		protocol.ReasoningDelta{SequenceNumber: 3, ItemID: "r/0", Delta: "Hm,"},
+		protocol.ReasoningDelta{SequenceNumber: 4, ItemID: "r/0", Delta: " Paris."},
+		protocol.ReasoningDone{SequenceNumber: 5, ItemID: "r/0", Text: "Hm, Paris."},
+		protocol.ContentPartDone{SequenceNumber: 6, ItemID: "r/0", Part: protocol.ReasoningText{Text: "Hm, Paris."}},
+		protocol.OutputItemDone{SequenceNumber: 7, Item: reasoning},
+		protocol.OutputItemAdded{SequenceNumber: 8, OutputIndex: 1, Item: protocol.Message{ID: "r/1", Status: protocol.StatusInProgress, Role: protocol.RoleAssistant}},
+		protocol.ContentPartAdded{SequenceNumber: 9, ItemID: "r/1", OutputIndex: 1, Part: protocol.OutputText{}},
+		protocol.OutputTextDelta{SequenceNumber: 10, ItemID: "r/1", OutputIndex: 1, Delta: "Paris"},
+		protocol.OutputTextDone{SequenceNumber: 11, ItemID: "r/1", OutputIndex: 1, Text: "Paris"},
+		protocol.ContentPartDone{SequenceNumber: 12, ItemID: "r/1", OutputIndex: 1, Part: protocol.OutputText{Text: "Paris"}},
+		protocol.OutputItemDone{SequenceNumber: 13, OutputIndex: 1, Item: msg},
+		protocol.ResponseCompleted{SequenceNumber: 14, Response: &protocol.Response{
+			Output: []protocol.Item{reasoning, msg},
+			Status: protocol.StatusCompleted,
+		}},
+	}
+}
+
+// TestAccumulatorReasoning wants a reasoning item folded: open, with the reasoning its deltas
+// have made, no status, and no encrypted content, which only its done event gives; done, the item
+// as done, its encrypted content included; and ahead of the message after it, in output order.
+func TestAccumulatorReasoning(t *testing.T) {
+	inProgress := func(output ...protocol.Item) *protocol.Response {
+		return &protocol.Response{Status: protocol.StatusInProgress, Output: output}
+	}
+	open := func(content ...protocol.ReasoningText) protocol.Reasoning {
+		return protocol.Reasoning{ID: "r/0", Content: content}
+	}
+	events := reasoningStream()
+	done := events[7].(protocol.OutputItemDone).Item
+	cases := []struct {
+		events int
+		want   *protocol.Response
+	}{
+		{2, inProgress(open())},
+		{3, inProgress(open(protocol.ReasoningText{}))},
+		{4, inProgress(open(protocol.ReasoningText{Text: "Hm,"}))},
+		{7, inProgress(open(protocol.ReasoningText{Text: "Hm, Paris."}))},
+		{8, inProgress(done)},
+		{11, inProgress(done, protocol.Message{ID: "r/1", Status: protocol.StatusInProgress, Role: protocol.RoleAssistant, Content: []protocol.ContentPart{protocol.OutputText{Text: "Paris"}}})},
+		{15, events[14].(protocol.ResponseCompleted).Response},
+	}
+	for _, tc := range cases {
+		var acc protocol.Accumulator
+		add(t, &acc, reasoningStream()[:tc.events])
+		if got := acc.Response(); !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("after %d events, Response = %#v\nwant %#v", tc.events, got, tc.want)
+		}
+	}
+}
+
+// TestAccumulatorRefusesReasoningEvent covers the reasoning events that don't follow the events
+// before them: out of order, of another item or part, and text the deltas didn't make. Each case
+// folds the first n events of reasoningStream, then wants e refused, and the response unchanged.
+func TestAccumulatorRefusesReasoningEvent(t *testing.T) {
+	reasoning := reasoningStream()[7].(protocol.OutputItemDone).Item.(protocol.Reasoning)
+	cases := []struct {
+		name string
+		n    int
+		e    protocol.Event
+		want string
+	}{
+		{"a reasoning item added with content", 1, protocol.OutputItemAdded{SequenceNumber: 1, Item: protocol.Reasoning{ID: "r/0", Content: reasoning.Content}}, "added with content"},
+		{"a reasoning item added with encrypted content", 1, protocol.OutputItemAdded{SequenceNumber: 1, Item: protocol.Reasoning{ID: "r/0", EncryptedContent: "sealed"}}, "added with content"},
+		{"a delta before the part is added", 2, protocol.ReasoningDelta{SequenceNumber: 2, ItemID: "r/0", Delta: "Hm"}, "content 0 wasn't added"},
+		{"an output_text part of a reasoning item", 2, protocol.ContentPartAdded{SequenceNumber: 2, ItemID: "r/0", Part: protocol.OutputText{}}, "unsupported part protocol.OutputText of a reasoning item"},
+		{"a reasoning_text part of a message", 9, protocol.ContentPartAdded{SequenceNumber: 9, ItemID: "r/1", OutputIndex: 1, Part: protocol.ReasoningText{}}, "unsupported part protocol.ReasoningText of a message"},
+		{"a reasoning delta of another item id", 3, protocol.ReasoningDelta{SequenceNumber: 3, ItemID: "r/1", Delta: "Hm"}, `output 0 is item "r/0", not "r/1"`},
+		{"an output_text delta of a reasoning_text part", 3, protocol.OutputTextDelta{SequenceNumber: 3, ItemID: "r/0", Delta: "Hm"}, "is protocol.ReasoningText"},
+		{"a reasoning delta of an output_text part", 10, protocol.ReasoningDelta{SequenceNumber: 10, ItemID: "r/1", OutputIndex: 1, Delta: "Hm"}, "is protocol.OutputText"},
+		{"a done text the deltas didn't make", 5, protocol.ReasoningDone{SequenceNumber: 5, ItemID: "r/0", Text: "Hm, Lyon."}, "isn't the text its deltas made"},
+		{"a delta after the text is done", 6, protocol.ReasoningDelta{SequenceNumber: 6, ItemID: "r/0", Delta: " "}, "text is done"},
+		{"a part done before its text", 5, protocol.ContentPartDone{SequenceNumber: 5, ItemID: "r/0", Part: protocol.ReasoningText{Text: "Hm, Paris."}}, "text isn't done"},
+		{"a done part the deltas didn't make", 6, protocol.ContentPartDone{SequenceNumber: 6, ItemID: "r/0", Part: protocol.ReasoningText{Text: "Hm."}}, "isn't the part its deltas made"},
+		{"a reasoning item done with its part open", 6, protocol.OutputItemDone{SequenceNumber: 6, Item: reasoning}, "content 0 isn't done"},
+		{"a reasoning item done of other content", 7, protocol.OutputItemDone{SequenceNumber: 7, Item: protocol.Reasoning{ID: "r/0", Content: []protocol.ReasoningText{{Text: "Hm."}}}}, "isn't the part streamed"},
+		{"a reasoning item done of no content", 7, protocol.OutputItemDone{SequenceNumber: 7, Item: protocol.Reasoning{ID: "r/0"}}, "has 0 content parts, want the 1 streamed"},
+		{"a reasoning item done of another id", 7, protocol.OutputItemDone{SequenceNumber: 7, Item: protocol.Reasoning{ID: "r/9", Content: reasoning.Content}}, `reasoning item "r/9" is done where reasoning item "r/0" was added`},
+		{"a reasoning item done as a message", 7, protocol.OutputItemDone{SequenceNumber: 7, Item: protocol.Message{ID: "r/0"}}, "where a reasoning item was added"},
+		{"a function call done where reasoning was added", 7, protocol.OutputItemDone{SequenceNumber: 7, Item: protocol.FunctionCall{ID: "r/0"}}, "where a reasoning item was added"},
+		{"a message added at the reasoning item's output index", 7, protocol.OutputItemAdded{SequenceNumber: 7, OutputIndex: 0, Item: protocol.Message{ID: "r/1", Role: protocol.RoleAssistant}}, "output 0 added, want output 1 next"},
+		{"response.completed with the reasoning item open", 7, protocol.ResponseCompleted{SequenceNumber: 7, Response: &protocol.Response{Output: []protocol.Item{reasoning}}}, "output 0 isn't done"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var acc protocol.Accumulator
+			add(t, &acc, reasoningStream()[:tc.n])
+			before := acc.Response()
+			err := acc.Add(tc.e)
+			if err == nil {
+				t.Fatalf("Add(%#v) = nil, want an error containing %q", tc.e, tc.want)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("Add error = %q, want it to contain %q", err, tc.want)
+			}
+			if after := acc.Response(); !reflect.DeepEqual(after, before) {
+				t.Errorf("Response after a refused event = %#v, want it unchanged, %#v", after, before)
+			}
+		})
+	}
+}

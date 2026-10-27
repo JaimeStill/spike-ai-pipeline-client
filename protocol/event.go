@@ -4,7 +4,8 @@ package protocol
 // under the spec's name. A stream opens with ResponseCreated and closes with one terminal event,
 // ResponseCompleted, ResponseIncomplete, or ResponseFailed, each carrying the Response. Between
 // them each output item is added, its content parts are added, streamed as deltas, and done, and
-// the item is done, in that order; a FunctionCall, which has no content parts, streams its
+// the item is done, in that order: a Message's parts are OutputText and Refusal, and a
+// Reasoning item's ReasoningText; a FunctionCall, which has no content parts, streams its
 // arguments as deltas and their done event between being added and being done. An Accumulator
 // folds the events back into the Response. The set is closed: the event types are this
 // package's, and an event is one of them by value, such as OutputTextDelta, never a pointer to
@@ -63,15 +64,16 @@ type ResponseFailed struct {
 
 func (ResponseFailed) event() {}
 
-// OutputItemAdded is response.output_item.added: an output item was added, its status
-// StatusInProgress, before any event about its content.
+// OutputItemAdded is response.output_item.added: an output item was added, before any event
+// about its content, its status StatusInProgress when it has one; a Reasoning item has none.
 type OutputItemAdded struct {
 	// SequenceNumber is the event's place in the stream.
 	SequenceNumber int
 	// OutputIndex is the item's place in the response's output.
 	OutputIndex int
 	// Item is the item as far as it is known when it is added: a Message has its role and no
-	// content, and a FunctionCall its call id and name and no arguments.
+	// content, a FunctionCall its call id and name and no arguments, and a Reasoning item no
+	// content and no encrypted content.
 	Item Item
 }
 
@@ -84,7 +86,8 @@ type OutputItemDone struct {
 	SequenceNumber int
 	// OutputIndex is the item's place in the response's output.
 	OutputIndex int
-	// Item is the whole item, with its status.
+	// Item is the whole item, with its status when it has one. A Reasoning item's carries the
+	// encrypted content its format writes, so the item can be sent back.
 	Item Item
 }
 
@@ -101,7 +104,8 @@ type ContentPartAdded struct {
 	OutputIndex int
 	// ContentIndex is the part's place in the item's content.
 	ContentIndex int
-	// Part is the part as added: an OutputText or a Refusal, its text empty.
+	// Part is the part as added: an OutputText or a Refusal of a Message, or a ReasoningText of
+	// a Reasoning item, its text empty.
 	Part ContentPart
 }
 
@@ -187,6 +191,39 @@ type RefusalDone struct {
 }
 
 func (RefusalDone) event() {}
+
+// ReasoningDelta is response.reasoning.delta: reasoning text was appended to a ReasoningText
+// part of a Reasoning item.
+type ReasoningDelta struct {
+	// SequenceNumber is the event's place in the stream.
+	SequenceNumber int
+	// ItemID is the reasoning item's id, its ID as added.
+	ItemID string
+	// OutputIndex is the reasoning item's place in the response's output.
+	OutputIndex int
+	// ContentIndex is the part's place in the item's content.
+	ContentIndex int
+	// Delta is the reasoning text appended.
+	Delta string
+}
+
+func (ReasoningDelta) event() {}
+
+// ReasoningDone is response.reasoning.done: a ReasoningText part's text is finished.
+type ReasoningDone struct {
+	// SequenceNumber is the event's place in the stream.
+	SequenceNumber int
+	// ItemID is the reasoning item's id, its ID as added.
+	ItemID string
+	// OutputIndex is the reasoning item's place in the response's output.
+	OutputIndex int
+	// ContentIndex is the part's place in the item's content.
+	ContentIndex int
+	// Text is the part's whole reasoning text, its deltas joined.
+	Text string
+}
+
+func (ReasoningDone) event() {}
 
 // FunctionCallArgumentsDelta is response.function_call_arguments.delta: argument text was
 // appended to a FunctionCall item. A function call has no content parts, so the event carries
