@@ -462,25 +462,42 @@ func TestRetryBackoff(t *testing.T) {
 	})
 }
 
-// TestFullJitter wants the Client's own jitter source to wait from 0 up to the cap.
+// TestFullJitter wants the Client's own jitter to wait from 0 up to the backoff's cap, each
+// wait in that range taken: a policy whose cap is 4ns retries a 503 a thousand times, and every
+// wait from 0 to 4ns is seen. A cap of the longest duration waits too, rather than overflow.
 func TestFullJitter(t *testing.T) {
-	if got := client.FullJitter(0); got != 0 {
-		t.Errorf("FullJitter(0) = %v, want 0", got)
+	// wait returns how long a Client of the policy, with its own jitter, waited between a 503
+	// and the attempt after it.
+	wait := func(t *testing.T, p client.RetryPolicy) time.Duration {
+		t.Helper()
+		var d time.Duration
+		synctest.Test(t, func(t *testing.T) {
+			c, s := retrying(t, p, nil, step{status: http.StatusServiceUnavailable}, step{status: http.StatusOK, body: okReply})
+			if _, err := c.Generate(t.Context(), hello()); err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+			if len(s.sent) != 2 {
+				t.Fatalf("%d requests sent, want 2", len(s.sent))
+			}
+			d = s.sent[1].at.Sub(s.sent[0].at)
+		})
+		return d
 	}
 	const d = 4 * time.Nanosecond
 	seen := map[time.Duration]bool{}
 	for range 1000 {
-		w := client.FullJitter(d)
+		w := wait(t, client.RetryPolicy{MaxAttempts: 2, BaseDelay: d, MaxDelay: d})
 		if w < 0 || w > d {
-			t.Fatalf("FullJitter(%v) = %v, want 0 to %v", d, w, d)
+			t.Fatalf("waited %v, want 0 to %v", w, d)
 		}
 		seen[w] = true
 	}
 	if len(seen) != 5 {
-		t.Errorf("FullJitter(%v) gave %d distinct waits in 1000, want all 5 from 0 to %v", d, len(seen), d)
+		t.Errorf("%d distinct waits in 1000, want all 5 from 0 to %v", len(seen), d)
 	}
-	if w := client.FullJitter(time.Duration(math.MaxInt64)); w < 0 {
-		t.Errorf("FullJitter of the longest duration = %v, want at least 0", w)
+	longest := time.Duration(math.MaxInt64)
+	if w := wait(t, client.RetryPolicy{MaxAttempts: 2, BaseDelay: longest, MaxDelay: longest}); w < 0 {
+		t.Errorf("waited %v with a cap of the longest duration, want at least 0", w)
 	}
 }
 
