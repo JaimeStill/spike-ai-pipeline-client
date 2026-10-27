@@ -10,14 +10,18 @@
 // sit beside the protocol, outside the Format, on the OpenAI-compatible shape whatever format the
 // Client speaks.
 //
-// The library ships no policy: no default model, token budget, timeout, retry, or size limit.
-// The caller's http.Client and context carry them.
+// The library sets no policy of its own: no default model, token budget, timeout, retry, or
+// size limit. The caller's http.Client and context carry the timeouts, and retry is opt-in, the
+// RetryPolicy the caller sets in Config.
 //
 // Its exported identifiers:
 //
-//   - [Config] describes an endpoint: base URL, query, token source, http.Client, and format.
+//   - [Config] describes an endpoint: base URL, query, token source, http.Client, format, and
+//     retry policy.
 //   - [TokenSource] returns the bearer token for one request.
 //   - [New] validates a Config and returns a Client.
+//   - [RetryPolicy] is the caller's opt-in policy for sending a request again: its most
+//     attempts and the backoff's base and most delays.
 //   - [Client] makes requests of one endpoint in one format.
 //   - [Client.Generate] sends a Request and returns its Response.
 //   - [Client.GenerateStream] sends a Request when ranged and yields its response's streaming

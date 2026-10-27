@@ -1,7 +1,6 @@
 package client
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -40,6 +39,10 @@ import (
 //     that fails, such as on a connection dropped or reset, whose error is wrapped too
 //   - an event the format can't decode is the format's error, wrapped
 //
+// With a Config.Retry policy, a request the policy retries is sent again before the stream
+// starts: until a 2xx reply arrives, its first byte unread. A stream once started is never sent
+// again; its error ends the sequence as above.
+//
 // Comments, such as llama.cpp's ping, a ":" line every 30 seconds, are no events and change
 // nothing.
 func (c *Client) GenerateStream(ctx context.Context, req *protocol.Request) iter.Seq2[protocol.Event, error] {
@@ -61,7 +64,7 @@ func (c *Client) stream(ctx context.Context, req *protocol.Request, yield func(p
 	if err != nil {
 		return err
 	}
-	resp, err := c.send(ctx, c.format.Route(), header, bytes.NewReader(body), "application/json", "text/event-stream",
+	resp, err := c.send(ctx, c.format.Route(), header, body, "application/json", "text/event-stream",
 		c.format.DecodeError)
 	if err != nil {
 		return err

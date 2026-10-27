@@ -1,7 +1,6 @@
 package client
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/binary"
@@ -59,7 +58,8 @@ type EmbeddingUsage struct {
 // each reply item's index places its vector; a reply whose items don't match the inputs one to
 // one, or whose vector isn't whole float32s, is an error. A non-2xx reply is an *APIError with
 // the OpenAI-style error body's details; a transport failure or a cancelled ctx is returned
-// wrapped.
+// wrapped. With a Config.Retry policy, a reply or failure the policy retries is sent again, and
+// the last attempt's error is returned as it would be without one.
 func (c *Client) Embed(ctx context.Context, req *EmbeddingRequest) (*Embeddings, error) {
 	if req == nil {
 		return nil, errors.New("client: embed: no request")
@@ -68,7 +68,7 @@ func (c *Client) Embed(ctx context.Context, req *EmbeddingRequest) (*Embeddings,
 	if err != nil {
 		return nil, fmt.Errorf("client: embed: %w", err)
 	}
-	reply, err := c.post(ctx, embeddingsRoute, nil, bytes.NewReader(body), "application/json", format.DecodeOpenAIError)
+	reply, err := c.post(ctx, embeddingsRoute, nil, body, "application/json", format.DecodeOpenAIError)
 	if err != nil {
 		return nil, fmt.Errorf("client: embed: %w", err)
 	}
