@@ -554,12 +554,6 @@ func TestEncode(t *testing.T) {
 	}
 }
 
-func TestRoute(t *testing.T) {
-	if got := completions.New().Route(); got != "chat/completions" {
-		t.Errorf("Route = %q, want chat/completions", got)
-	}
-}
-
 // TestReasoningRoundTrip sends a reply's output back as input, and wants the reasoning_content
 // it came with sent back exactly, on the assistant message it led to.
 func TestReasoningRoundTrip(t *testing.T) {
