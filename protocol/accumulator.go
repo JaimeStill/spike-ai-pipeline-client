@@ -14,8 +14,9 @@ import (
 // stream that breaks leaves the partial output.
 //
 // Add refuses an event that doesn't follow the events before it: anything before
-// response.created or after a terminal event, a sequence number that doesn't increase, an event
-// about an item or part that wasn't added or is already done, a part added before the one
+// response.created or after a terminal event, a sequence number that doesn't increase, an item
+// added under the id of one added before it, an event about an item or part that wasn't added or
+// is already done, an item_id that isn't the id of the item at the event's output_index, a part added before the one
 // ahead of it is done, a done event whose text or content isn't what the deltas made, and a
 // terminal response.completed or response.incomplete while an item is open. A refused event
 // changes nothing.
@@ -163,13 +164,24 @@ func (a *Accumulator) addItem(e OutputItemAdded) error {
 	if e.OutputIndex != len(a.items) {
 		return fmt.Errorf("output %d added, want output %d next", e.OutputIndex, len(a.items))
 	}
+	var id string
 	switch it := e.Item.(type) {
 	case Message:
 		if len(it.Content) > 0 {
 			return errors.New("the message is added with content")
 		}
+		id = it.ID
 	default:
 		return fmt.Errorf("unsupported item %T", e.Item)
+	}
+	// Items are found by output index, which every event about one carries, and their ids
+	// checked against it; an empty id, from a format with none to give, is never a repeat.
+	if id != "" {
+		for i, it := range a.items {
+			if itemID(it.item) == id {
+				return fmt.Errorf("item %q is already output %d", id, i)
+			}
+		}
 	}
 	a.items = append(a.items, &foldItem{item: e.Item})
 	return nil
@@ -303,6 +315,14 @@ func (a *Accumulator) textPart(itemID string, output, content int, refusal bool)
 		return nil, fmt.Errorf("output %d content %d's text is done", output, content)
 	}
 	return p, nil
+}
+
+// itemID returns it's id, empty for an item the accumulator doesn't fold.
+func itemID(it Item) string {
+	if m, ok := it.(Message); ok {
+		return m.ID
+	}
+	return ""
 }
 
 // folded is the part its events have made so far.

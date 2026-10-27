@@ -10,8 +10,10 @@ package protocol
 //
 // Every event carries its SequenceNumber, which increases through the stream. An event about an
 // output item carries the item's OutputIndex, its place in the Response's Output, and an event
-// about a content part carries the item's ItemID, empty when the format supplies no item ids,
-// and the part's ContentIndex, its place in the item's content.
+// about a content part carries the item's ItemID, the ID of the item as added, and the part's
+// ContentIndex, its place in the item's content. The spec requires the item id there; a format
+// whose API supplies none derives one, as completions does, and leaves it empty only when it has
+// nothing to derive it from.
 type Event interface {
 	event()
 }
@@ -90,7 +92,7 @@ func (OutputItemDone) event() {}
 type ContentPartAdded struct {
 	// SequenceNumber is the event's place in the stream.
 	SequenceNumber int
-	// ItemID is the item's id, empty when the format supplies none.
+	// ItemID is the item's id, its ID as added.
 	ItemID string
 	// OutputIndex is the item's place in the response's output.
 	OutputIndex int
@@ -107,7 +109,7 @@ func (ContentPartAdded) event() {}
 type ContentPartDone struct {
 	// SequenceNumber is the event's place in the stream.
 	SequenceNumber int
-	// ItemID is the item's id, empty when the format supplies none.
+	// ItemID is the item's id, its ID as added.
 	ItemID string
 	// OutputIndex is the item's place in the response's output.
 	OutputIndex int
@@ -123,7 +125,7 @@ func (ContentPartDone) event() {}
 type OutputTextDelta struct {
 	// SequenceNumber is the event's place in the stream.
 	SequenceNumber int
-	// ItemID is the item's id, empty when the format supplies none.
+	// ItemID is the item's id, its ID as added.
 	ItemID string
 	// OutputIndex is the item's place in the response's output.
 	OutputIndex int
@@ -139,7 +141,7 @@ func (OutputTextDelta) event() {}
 type OutputTextDone struct {
 	// SequenceNumber is the event's place in the stream.
 	SequenceNumber int
-	// ItemID is the item's id, empty when the format supplies none.
+	// ItemID is the item's id, its ID as added.
 	ItemID string
 	// OutputIndex is the item's place in the response's output.
 	OutputIndex int
@@ -155,7 +157,7 @@ func (OutputTextDone) event() {}
 type RefusalDelta struct {
 	// SequenceNumber is the event's place in the stream.
 	SequenceNumber int
-	// ItemID is the item's id, empty when the format supplies none.
+	// ItemID is the item's id, its ID as added.
 	ItemID string
 	// OutputIndex is the item's place in the response's output.
 	OutputIndex int
@@ -171,7 +173,7 @@ func (RefusalDelta) event() {}
 type RefusalDone struct {
 	// SequenceNumber is the event's place in the stream.
 	SequenceNumber int
-	// ItemID is the item's id, empty when the format supplies none.
+	// ItemID is the item's id, its ID as added.
 	ItemID string
 	// OutputIndex is the item's place in the response's output.
 	OutputIndex int

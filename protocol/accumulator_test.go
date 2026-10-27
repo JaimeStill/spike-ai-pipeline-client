@@ -174,3 +174,31 @@ func TestAccumulatorFailedWithItemOpen(t *testing.T) {
 		t.Errorf("Response = %#v, want the failed response %#v", got, failed)
 	}
 }
+
+// TestAccumulatorItemIDs wants an item added under the id of an item before it refused, and
+// items of no id, from a format with none to give, accepted however many there are.
+func TestAccumulatorItemIDs(t *testing.T) {
+	// items folds a stream of empty assistant messages of ids, each added and done, then adds
+	// one more of id last, and returns Add's error for it.
+	items := func(last string, ids ...string) error {
+		var acc protocol.Accumulator
+		events := []protocol.Event{protocol.ResponseCreated{Response: &protocol.Response{}}}
+		for i, id := range ids {
+			m := protocol.Message{ID: id, Role: protocol.RoleAssistant}
+			events = append(events,
+				protocol.OutputItemAdded{SequenceNumber: 2*i + 1, OutputIndex: i, Item: m},
+				protocol.OutputItemDone{SequenceNumber: 2*i + 2, OutputIndex: i, Item: m})
+		}
+		add(t, &acc, events)
+		return acc.Add(protocol.OutputItemAdded{SequenceNumber: len(events), OutputIndex: len(ids), Item: protocol.Message{ID: last, Role: protocol.RoleAssistant}})
+	}
+	if err := items("r/1", "r/0"); err != nil {
+		t.Errorf("Add(a new id) = %v, want nil", err)
+	}
+	if err := items("", "", ""); err != nil {
+		t.Errorf("Add(no id, after items of none) = %v, want nil", err)
+	}
+	if err := items("r/0", "r/0", "r/1"); err == nil || !strings.Contains(err.Error(), `item "r/0" is already output 0`) {
+		t.Errorf("Add(a repeated id) = %v, want an error naming the earlier output", err)
+	}
+}

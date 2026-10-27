@@ -3,7 +3,8 @@
 Chat Completions replies recorded from the llama.cpp router on gb10-2 (b11669, set A), each
 streamed (`.sse`, the body as it arrived) and unstreamed (`.json`) for the same request, sent with
 `temperature` 0 and `seed` 7 so the two replies agree. The stream tests translate each `.sse` and
-fold its events, and compare the result with what `DecodeResponse` gives for the `.json`.
+fold its events, and compare the result with what `DecodeResponse` gives for the `.json` given the
+stream's id: the two were separate requests, so their ids differ, and the item ids derive from it.
 
 - `text.sse`, `text.json`: gpt-oss-120b, reasoning effort low, asked "Name three French cities,
   comma-separated, nothing else."; reasoning_content, then content, finish_reason `stop`, and

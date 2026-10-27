@@ -7,13 +7,16 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/JaimeStill/spike-ai-pipeline-client/format"
 	"github.com/JaimeStill/spike-ai-pipeline-client/protocol"
 )
 
-// DecodeResponse decodes a Chat Completions response body. The first choice's message's
+// DecodeResponse decodes a Chat Completions response body. Each output item gets the id itemID
+// derives from the reply's id and the item's place in the output, as Chat Completions supplies
+// no item ids. The first choice's message's
 // reasoning_content, when it has one, becomes a reasoning item ahead of the others: its content
 // one reasoning_text part of the text, and its encrypted_content the format's envelope holding
 // it, which EncodeRequest reads back. The message then becomes an assistant message item, its content an output_text part and its refusal a refusal part;
@@ -39,6 +42,8 @@ func (*Format) DecodeResponse(body []byte) (*protocol.Response, error) {
 	}
 	choice := wire.Choices[0]
 	resp := &protocol.Response{Usage: decodeUsage(wire.Usage)}
+	// id is the next output item's id.
+	id := func() string { return itemID(wire.ID, len(resp.Output)) }
 	var ok bool
 	if resp.Status, resp.IncompleteDetails, ok = decodeFinish(choice.FinishReason); !ok {
 		return nil, fmt.Errorf("completions: response has unknown finish_reason %q", choice.FinishReason)
@@ -49,6 +54,7 @@ func (*Format) DecodeResponse(body []byte) (*protocol.Response, error) {
 			return nil, fmt.Errorf("completions: reasoning: %w", err)
 		}
 		resp.Output = append(resp.Output, protocol.Reasoning{
+			ID:               id(),
 			Content:          []protocol.ReasoningText{{Text: r}},
 			EncryptedContent: sealed,
 		})
@@ -62,6 +68,7 @@ func (*Format) DecodeResponse(body []byte) (*protocol.Response, error) {
 	}
 	if len(content) > 0 {
 		resp.Output = append(resp.Output, protocol.Message{
+			ID:      id(),
 			Status:  resp.Status,
 			Role:    protocol.RoleAssistant,
 			Content: content,
@@ -72,6 +79,7 @@ func (*Format) DecodeResponse(body []byte) (*protocol.Response, error) {
 			return nil, fmt.Errorf("completions: response tool call %d has unknown type %q", i, c.Type)
 		}
 		resp.Output = append(resp.Output, protocol.FunctionCall{
+			ID:        id(),
 			Status:    resp.Status,
 			CallID:    c.ID,
 			Name:      c.Function.Name,
@@ -79,6 +87,21 @@ func (*Format) DecodeResponse(body []byte) (*protocol.Response, error) {
 		})
 	}
 	return resp, nil
+}
+
+// itemID returns the id of the output item at output in the reply whose id is reply: the reply's
+// id, a slash, and output in decimal, such as "chatcmpl-abc/1". Chat Completions supplies no item
+// ids, and the spec requires one on every output item and on the events about it, so the format
+// derives them, alike for every kind of item and alike streamed and unstreamed: every chunk of a
+// stream carries the reply's id, so a streamed reply's items get the ids DecodeResponse gives the
+// same reply. The id is unique within the reply, as output is, and across replies, as the reply's
+// id is. A reply with no id gives its items none: an id made of output alone would repeat in
+// every reply, which an empty one doesn't claim not to.
+func itemID(reply string, output int) string {
+	if reply == "" {
+		return ""
+	}
+	return reply + "/" + strconv.Itoa(output)
 }
 
 // decodeUsage returns a reply's usage as the protocol's.
@@ -126,7 +149,7 @@ func (*Format) DecodeError(body []byte) (message, typ, code string) {
 // NewStreamDecoder returns a decoder for one streamed Chat Completions reply: a stream of
 // chat.completion.chunk events, which it turns into the protocol's streaming events in the
 // spec's order. Chat Completions names no event types: every event's data is a chunk, or the
-// [DONE] that ends the stream. Of each chunk it reads the first choice, index 0, and the usage.
+// [DONE] that ends the stream. Of each chunk it reads the id, the first choice, index 0, and the usage.
 //
 // The first event opens the stream with response.created, its response in_progress. The
 // choice's content and refusal deltas make the assistant message: output_item.added, in
@@ -142,7 +165,10 @@ func (*Format) DecodeError(body []byte) (message, typ, code string) {
 // usage of the chunk that carried it. A stream that ends with no finish_reason is
 // io.ErrUnexpectedEOF; so is [DONE] without one. A chunk that isn't JSON, an unknown
 // finish_reason, a delta after the finish_reason, or an event after [DONE] is an error. The
-// message has no id, as Chat Completions gives none, so its events' item_id is empty.
+// stream's id is its first chunk's, which every chunk repeats; a chunk with another id is an
+// error. The message's id, its events' item_id, is the one DecodeResponse gives it: itemID
+// derives it from the stream's id and the message's output index, as Chat Completions supplies
+// no item ids.
 func (*Format) NewStreamDecoder() format.StreamDecoder {
 	return &streamDecoder{}
 }
@@ -151,6 +177,9 @@ func (*Format) NewStreamDecoder() format.StreamDecoder {
 type streamDecoder struct {
 	// seq is the next event's sequence number.
 	seq int
+	// id is the reply's id, the first chunk's; chunked is set once that chunk is read.
+	id      string
+	chunked bool
 	// created is set once response.created is made, and ended once the terminal event is, or
 	// an error has broken the stream.
 	created, ended bool
@@ -169,7 +198,8 @@ type streamDecoder struct {
 
 // streamMessage is the assistant message a stream is making.
 type streamMessage struct {
-	// index is the message's place in the output.
+	// id is the message's id, and index its place in the output.
+	id    string
 	index int
 	// content is the parts done.
 	content []protocol.ContentPart
@@ -215,6 +245,12 @@ func (d *streamDecoder) decode(data []byte) error {
 	var c chunk
 	if err := json.Unmarshal(data, &c); err != nil {
 		return fmt.Errorf("decode chunk: %w", err)
+	}
+	switch {
+	case !d.chunked:
+		d.id, d.chunked = c.ID, true
+	case c.ID != d.id:
+		return fmt.Errorf("chunk of reply %q in the stream of reply %q", c.ID, d.id)
 	}
 	if c.Usage != nil {
 		d.usage = decodeUsage(*c.Usage)
@@ -286,12 +322,12 @@ func (d *streamDecoder) delta(kind partKind, text string) {
 	}
 	m := d.message
 	if m == nil {
-		m = &streamMessage{index: len(d.output)}
+		m = &streamMessage{id: itemID(d.id, len(d.output)), index: len(d.output)}
 		d.message = m
 		d.emit(protocol.OutputItemAdded{
 			SequenceNumber: d.next(),
 			OutputIndex:    m.index,
-			Item:           protocol.Message{Status: protocol.StatusInProgress, Role: protocol.RoleAssistant},
+			Item:           protocol.Message{ID: m.id, Status: protocol.StatusInProgress, Role: protocol.RoleAssistant},
 		})
 	}
 	if m.part != kind {
@@ -301,13 +337,13 @@ func (d *streamDecoder) delta(kind partKind, text string) {
 		if kind == partRefusal {
 			part = protocol.Refusal{}
 		}
-		d.emit(protocol.ContentPartAdded{SequenceNumber: d.next(), OutputIndex: m.index, ContentIndex: len(m.content), Part: part})
+		d.emit(protocol.ContentPartAdded{SequenceNumber: d.next(), ItemID: m.id, OutputIndex: m.index, ContentIndex: len(m.content), Part: part})
 	}
 	m.text.WriteString(text)
 	if kind == partRefusal {
-		d.emit(protocol.RefusalDelta{SequenceNumber: d.next(), OutputIndex: m.index, ContentIndex: len(m.content), Delta: text})
+		d.emit(protocol.RefusalDelta{SequenceNumber: d.next(), ItemID: m.id, OutputIndex: m.index, ContentIndex: len(m.content), Delta: text})
 	} else {
-		d.emit(protocol.OutputTextDelta{SequenceNumber: d.next(), OutputIndex: m.index, ContentIndex: len(m.content), Delta: text})
+		d.emit(protocol.OutputTextDelta{SequenceNumber: d.next(), ItemID: m.id, OutputIndex: m.index, ContentIndex: len(m.content), Delta: text})
 	}
 }
 
@@ -322,12 +358,12 @@ func (d *streamDecoder) closePart() {
 	var part protocol.ContentPart
 	if m.part == partRefusal {
 		part = protocol.Refusal{Refusal: text}
-		d.emit(protocol.RefusalDone{SequenceNumber: d.next(), OutputIndex: m.index, ContentIndex: index, Refusal: text})
+		d.emit(protocol.RefusalDone{SequenceNumber: d.next(), ItemID: m.id, OutputIndex: m.index, ContentIndex: index, Refusal: text})
 	} else {
 		part = protocol.OutputText{Text: text}
-		d.emit(protocol.OutputTextDone{SequenceNumber: d.next(), OutputIndex: m.index, ContentIndex: index, Text: text})
+		d.emit(protocol.OutputTextDone{SequenceNumber: d.next(), ItemID: m.id, OutputIndex: m.index, ContentIndex: index, Text: text})
 	}
-	d.emit(protocol.ContentPartDone{SequenceNumber: d.next(), OutputIndex: m.index, ContentIndex: index, Part: part})
+	d.emit(protocol.ContentPartDone{SequenceNumber: d.next(), ItemID: m.id, OutputIndex: m.index, ContentIndex: index, Part: part})
 	m.content = append(m.content, part)
 	m.part = partNone
 	m.text.Reset()
@@ -340,7 +376,7 @@ func (d *streamDecoder) closeMessage(status protocol.Status) {
 		return
 	}
 	d.closePart()
-	m := protocol.Message{Status: status, Role: protocol.RoleAssistant, Content: d.message.content}
+	m := protocol.Message{ID: d.message.id, Status: status, Role: protocol.RoleAssistant, Content: d.message.content}
 	d.emit(protocol.OutputItemDone{SequenceNumber: d.next(), OutputIndex: d.message.index, Item: m})
 	d.output = append(d.output, m)
 	d.message = nil

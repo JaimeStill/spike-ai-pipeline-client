@@ -2,6 +2,7 @@ package completions_test
 
 import (
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -61,17 +62,18 @@ func stream(chunks ...string) string {
 	return b.String()
 }
 
-// delta is a chunk of one choice with delta and finish_reason, null when finish is empty.
+// delta is a chunk of reply chatcmpl-1 of one choice with delta and finish_reason, null when
+// finish is empty.
 func delta(delta, finish string) string {
 	reason := "null"
 	if finish != "" {
 		reason = `"` + finish + `"`
 	}
-	return `{"choices":[{"index":0,"delta":` + delta + `,"finish_reason":` + reason + `}],"object":"chat.completion.chunk"}`
+	return `{"id":"chatcmpl-1","choices":[{"index":0,"delta":` + delta + `,"finish_reason":` + reason + `}],"object":"chat.completion.chunk"}`
 }
 
-// usageChunk is the chunk of no choices that carries the usage.
-const usageChunk = `{"choices":[],"usage":{"completion_tokens":5,"prompt_tokens":7,"total_tokens":12}}`
+// usageChunk is reply chatcmpl-1's chunk of no choices that carries the usage.
+const usageChunk = `{"id":"chatcmpl-1","choices":[],"usage":{"completion_tokens":5,"prompt_tokens":7,"total_tokens":12}}`
 
 // readTestdata returns the file name in testdata.
 func readTestdata(t *testing.T, name string) string {
@@ -83,7 +85,8 @@ func readTestdata(t *testing.T, name string) string {
 	return string(b)
 }
 
-// trace renders events one per line, each its spec type and the members it carries.
+// trace renders events one per line, each its spec type and the members it carries: a part
+// event's output index, content index, and item id, then its part or text.
 func trace(events []protocol.Event) string {
 	var b strings.Builder
 	for _, e := range events {
@@ -99,17 +102,17 @@ func trace(events []protocol.Event) string {
 		case protocol.OutputItemDone:
 			fmt.Fprintf(&b, "%d response.output_item.done %d %#v\n", e.SequenceNumber, e.OutputIndex, e.Item)
 		case protocol.ContentPartAdded:
-			fmt.Fprintf(&b, "%d response.content_part.added %d %d %#v\n", e.SequenceNumber, e.OutputIndex, e.ContentIndex, e.Part)
+			fmt.Fprintf(&b, "%d response.content_part.added %d %d %s %#v\n", e.SequenceNumber, e.OutputIndex, e.ContentIndex, e.ItemID, e.Part)
 		case protocol.ContentPartDone:
-			fmt.Fprintf(&b, "%d response.content_part.done %d %d %#v\n", e.SequenceNumber, e.OutputIndex, e.ContentIndex, e.Part)
+			fmt.Fprintf(&b, "%d response.content_part.done %d %d %s %#v\n", e.SequenceNumber, e.OutputIndex, e.ContentIndex, e.ItemID, e.Part)
 		case protocol.OutputTextDelta:
-			fmt.Fprintf(&b, "%d response.output_text.delta %d %d %q\n", e.SequenceNumber, e.OutputIndex, e.ContentIndex, e.Delta)
+			fmt.Fprintf(&b, "%d response.output_text.delta %d %d %s %q\n", e.SequenceNumber, e.OutputIndex, e.ContentIndex, e.ItemID, e.Delta)
 		case protocol.OutputTextDone:
-			fmt.Fprintf(&b, "%d response.output_text.done %d %d %q\n", e.SequenceNumber, e.OutputIndex, e.ContentIndex, e.Text)
+			fmt.Fprintf(&b, "%d response.output_text.done %d %d %s %q\n", e.SequenceNumber, e.OutputIndex, e.ContentIndex, e.ItemID, e.Text)
 		case protocol.RefusalDelta:
-			fmt.Fprintf(&b, "%d response.refusal.delta %d %d %q\n", e.SequenceNumber, e.OutputIndex, e.ContentIndex, e.Delta)
+			fmt.Fprintf(&b, "%d response.refusal.delta %d %d %s %q\n", e.SequenceNumber, e.OutputIndex, e.ContentIndex, e.ItemID, e.Delta)
 		case protocol.RefusalDone:
-			fmt.Fprintf(&b, "%d response.refusal.done %d %d %q\n", e.SequenceNumber, e.OutputIndex, e.ContentIndex, e.Refusal)
+			fmt.Fprintf(&b, "%d response.refusal.done %d %d %s %q\n", e.SequenceNumber, e.OutputIndex, e.ContentIndex, e.ItemID, e.Refusal)
 		default:
 			fmt.Fprintf(&b, "%T\n", e)
 		}
@@ -150,21 +153,44 @@ func assertResponse(t *testing.T, got, want *protocol.Response) {
 	}
 }
 
-// withoutReasoning returns resp with its reasoning items left out of its output: the stream
-// decoder translates the message alone, so a streamed reply's reasoning_content makes no event.
-func withoutReasoning(resp *protocol.Response) *protocol.Response {
-	r := *resp
-	r.Output = nil
-	for _, it := range resp.Output {
-		if _, ok := it.(protocol.Reasoning); !ok {
-			r.Output = append(r.Output, it)
-		}
+// asStreamed returns reply, an unstreamed reply's body, as the reply a stream of id gave: its
+// id, id, and its reasoning_content left out, as the stream decoder translates the message
+// alone. The recorded replies were each sent twice, so the streamed one's id isn't the other's.
+func asStreamed(t *testing.T, reply, id string) string {
+	t.Helper()
+	var r map[string]any
+	if err := json.Unmarshal([]byte(reply), &r); err != nil {
+		t.Fatal(err)
 	}
-	return &r
+	r["id"] = id
+	for _, c := range r["choices"].([]any) {
+		delete(c.(map[string]any)["message"].(map[string]any), "reasoning_content")
+	}
+	b, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// firstChunkID returns the id of the first chunk of body, a text/event-stream reply.
+func firstChunkID(t *testing.T, body string) string {
+	t.Helper()
+	e, err := sse.NewDecoder(strings.NewReader(body)).Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(e.Data), &c); err != nil {
+		t.Fatal(err)
+	}
+	return c.ID
 }
 
 // TestStreamRecorded translates the recorded router streams to events, and folds them to the
-// Response DecodeResponse gives for the same reply unstreamed.
+// Response DecodeResponse gives for the same reply unstreamed, item ids included.
 func TestStreamRecorded(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -172,46 +198,47 @@ func TestStreamRecorded(t *testing.T) {
 	}{
 		{"text", `
 			0 response.created in_progress
-			1 response.output_item.added 0 protocol.Message{ID:"", Status:"in_progress", Role:"assistant", Content:[]protocol.ContentPart(nil)}
-			2 response.content_part.added 0 0 protocol.OutputText{Text:""}
-			3 response.output_text.delta 0 0 "Paris"
-			4 response.output_text.delta 0 0 ","
-			5 response.output_text.delta 0 0 " Lyon"
-			6 response.output_text.delta 0 0 ","
-			7 response.output_text.delta 0 0 " Marseille"
-			8 response.output_text.done 0 0 "Paris, Lyon, Marseille"
-			9 response.content_part.done 0 0 protocol.OutputText{Text:"Paris, Lyon, Marseille"}
-			10 response.output_item.done 0 protocol.Message{ID:"", Status:"completed", Role:"assistant", Content:[]protocol.ContentPart{protocol.OutputText{Text:"Paris, Lyon, Marseille"}}}
+			1 response.output_item.added 0 protocol.Message{ID:"chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/0", Status:"in_progress", Role:"assistant", Content:[]protocol.ContentPart(nil)}
+			2 response.content_part.added 0 0 chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/0 protocol.OutputText{Text:""}
+			3 response.output_text.delta 0 0 chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/0 "Paris"
+			4 response.output_text.delta 0 0 chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/0 ","
+			5 response.output_text.delta 0 0 chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/0 " Lyon"
+			6 response.output_text.delta 0 0 chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/0 ","
+			7 response.output_text.delta 0 0 chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/0 " Marseille"
+			8 response.output_text.done 0 0 chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/0 "Paris, Lyon, Marseille"
+			9 response.content_part.done 0 0 chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/0 protocol.OutputText{Text:"Paris, Lyon, Marseille"}
+			10 response.output_item.done 0 protocol.Message{ID:"chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/0", Status:"completed", Role:"assistant", Content:[]protocol.ContentPart{protocol.OutputText{Text:"Paris, Lyon, Marseille"}}}
 			11 response.completed 1 items`},
 		{"length", `
 			0 response.created in_progress
-			1 response.output_item.added 0 protocol.Message{ID:"", Status:"in_progress", Role:"assistant", Content:[]protocol.ContentPart(nil)}
-			2 response.content_part.added 0 0 protocol.OutputText{Text:""}
-			3 response.output_text.delta 0 0 "1"
-			4 response.output_text.delta 0 0 ","
-			5 response.output_text.delta 0 0 " "
-			6 response.output_text.delta 0 0 "2"
-			7 response.output_text.delta 0 0 ","
-			8 response.output_text.delta 0 0 " "
-			9 response.output_text.delta 0 0 "3"
-			10 response.output_text.delta 0 0 ","
-			11 response.output_text.done 0 0 "1, 2, 3,"
-			12 response.content_part.done 0 0 protocol.OutputText{Text:"1, 2, 3,"}
-			13 response.output_item.done 0 protocol.Message{ID:"", Status:"incomplete", Role:"assistant", Content:[]protocol.ContentPart{protocol.OutputText{Text:"1, 2, 3,"}}}
+			1 response.output_item.added 0 protocol.Message{ID:"chatcmpl-Ua3L4FAciVzBKIrsejypEGgyaReDN4Rk/0", Status:"in_progress", Role:"assistant", Content:[]protocol.ContentPart(nil)}
+			2 response.content_part.added 0 0 chatcmpl-Ua3L4FAciVzBKIrsejypEGgyaReDN4Rk/0 protocol.OutputText{Text:""}
+			3 response.output_text.delta 0 0 chatcmpl-Ua3L4FAciVzBKIrsejypEGgyaReDN4Rk/0 "1"
+			4 response.output_text.delta 0 0 chatcmpl-Ua3L4FAciVzBKIrsejypEGgyaReDN4Rk/0 ","
+			5 response.output_text.delta 0 0 chatcmpl-Ua3L4FAciVzBKIrsejypEGgyaReDN4Rk/0 " "
+			6 response.output_text.delta 0 0 chatcmpl-Ua3L4FAciVzBKIrsejypEGgyaReDN4Rk/0 "2"
+			7 response.output_text.delta 0 0 chatcmpl-Ua3L4FAciVzBKIrsejypEGgyaReDN4Rk/0 ","
+			8 response.output_text.delta 0 0 chatcmpl-Ua3L4FAciVzBKIrsejypEGgyaReDN4Rk/0 " "
+			9 response.output_text.delta 0 0 chatcmpl-Ua3L4FAciVzBKIrsejypEGgyaReDN4Rk/0 "3"
+			10 response.output_text.delta 0 0 chatcmpl-Ua3L4FAciVzBKIrsejypEGgyaReDN4Rk/0 ","
+			11 response.output_text.done 0 0 chatcmpl-Ua3L4FAciVzBKIrsejypEGgyaReDN4Rk/0 "1, 2, 3,"
+			12 response.content_part.done 0 0 chatcmpl-Ua3L4FAciVzBKIrsejypEGgyaReDN4Rk/0 protocol.OutputText{Text:"1, 2, 3,"}
+			13 response.output_item.done 0 protocol.Message{ID:"chatcmpl-Ua3L4FAciVzBKIrsejypEGgyaReDN4Rk/0", Status:"incomplete", Role:"assistant", Content:[]protocol.ContentPart{protocol.OutputText{Text:"1, 2, 3,"}}}
 			14 response.incomplete 1 items`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			r := decodeStream(t, readTestdata(t, tc.name+".sse"))
+			body := readTestdata(t, tc.name+".sse")
+			r := decodeStream(t, body)
 			if r.err != nil {
 				t.Fatalf("stream error: %v", r.err)
 			}
 			assertTrace(t, r.events, tc.trace)
-			want, err := decode(readTestdata(t, tc.name+".json"))
+			want, err := decode(asStreamed(t, readTestdata(t, tc.name+".json"), firstChunkID(t, body)))
 			if err != nil {
 				t.Fatalf("DecodeResponse: %v", err)
 			}
-			assertResponse(t, fold(t, r.events), withoutReasoning(want))
+			assertResponse(t, fold(t, r.events), want)
 		})
 	}
 }
@@ -250,15 +277,15 @@ func TestStreamParts(t *testing.T) {
 			},
 			trace: `
 				0 response.created in_progress
-				1 response.output_item.added 0 protocol.Message{ID:"", Status:"in_progress", Role:"assistant", Content:[]protocol.ContentPart(nil)}
-				2 response.content_part.added 0 0 protocol.Refusal{Refusal:""}
-				3 response.refusal.delta 0 0 "I can't"
-				4 response.refusal.delta 0 0 " help."
-				5 response.refusal.done 0 0 "I can't help."
-				6 response.content_part.done 0 0 protocol.Refusal{Refusal:"I can't help."}
-				7 response.output_item.done 0 protocol.Message{ID:"", Status:"completed", Role:"assistant", Content:[]protocol.ContentPart{protocol.Refusal{Refusal:"I can't help."}}}
+				1 response.output_item.added 0 protocol.Message{ID:"chatcmpl-1/0", Status:"in_progress", Role:"assistant", Content:[]protocol.ContentPart(nil)}
+				2 response.content_part.added 0 0 chatcmpl-1/0 protocol.Refusal{Refusal:""}
+				3 response.refusal.delta 0 0 chatcmpl-1/0 "I can't"
+				4 response.refusal.delta 0 0 chatcmpl-1/0 " help."
+				5 response.refusal.done 0 0 chatcmpl-1/0 "I can't help."
+				6 response.content_part.done 0 0 chatcmpl-1/0 protocol.Refusal{Refusal:"I can't help."}
+				7 response.output_item.done 0 protocol.Message{ID:"chatcmpl-1/0", Status:"completed", Role:"assistant", Content:[]protocol.ContentPart{protocol.Refusal{Refusal:"I can't help."}}}
 				8 response.completed 1 items`,
-			reply: `{"choices":[{"message":{"refusal":"I can't help."},"finish_reason":"stop"}],
+			reply: `{"id":"chatcmpl-1","choices":[{"message":{"refusal":"I can't help."},"finish_reason":"stop"}],
 				"usage":{"completion_tokens":5,"prompt_tokens":7,"total_tokens":12}}`,
 		},
 		{
@@ -270,18 +297,18 @@ func TestStreamParts(t *testing.T) {
 			},
 			trace: `
 				0 response.created in_progress
-				1 response.output_item.added 0 protocol.Message{ID:"", Status:"in_progress", Role:"assistant", Content:[]protocol.ContentPart(nil)}
-				2 response.content_part.added 0 0 protocol.OutputText{Text:""}
-				3 response.output_text.delta 0 0 "Well"
-				4 response.output_text.done 0 0 "Well"
-				5 response.content_part.done 0 0 protocol.OutputText{Text:"Well"}
-				6 response.content_part.added 0 1 protocol.Refusal{Refusal:""}
-				7 response.refusal.delta 0 1 "No."
-				8 response.refusal.done 0 1 "No."
-				9 response.content_part.done 0 1 protocol.Refusal{Refusal:"No."}
-				10 response.output_item.done 0 protocol.Message{ID:"", Status:"incomplete", Role:"assistant", Content:[]protocol.ContentPart{protocol.OutputText{Text:"Well"}, protocol.Refusal{Refusal:"No."}}}
+				1 response.output_item.added 0 protocol.Message{ID:"chatcmpl-1/0", Status:"in_progress", Role:"assistant", Content:[]protocol.ContentPart(nil)}
+				2 response.content_part.added 0 0 chatcmpl-1/0 protocol.OutputText{Text:""}
+				3 response.output_text.delta 0 0 chatcmpl-1/0 "Well"
+				4 response.output_text.done 0 0 chatcmpl-1/0 "Well"
+				5 response.content_part.done 0 0 chatcmpl-1/0 protocol.OutputText{Text:"Well"}
+				6 response.content_part.added 0 1 chatcmpl-1/0 protocol.Refusal{Refusal:""}
+				7 response.refusal.delta 0 1 chatcmpl-1/0 "No."
+				8 response.refusal.done 0 1 chatcmpl-1/0 "No."
+				9 response.content_part.done 0 1 chatcmpl-1/0 protocol.Refusal{Refusal:"No."}
+				10 response.output_item.done 0 protocol.Message{ID:"chatcmpl-1/0", Status:"incomplete", Role:"assistant", Content:[]protocol.ContentPart{protocol.OutputText{Text:"Well"}, protocol.Refusal{Refusal:"No."}}}
 				11 response.incomplete 1 items`,
-			reply: `{"choices":[{"message":{"content":"Well","refusal":"No."},"finish_reason":"content_filter"}],
+			reply: `{"id":"chatcmpl-1","choices":[{"message":{"content":"Well","refusal":"No."},"finish_reason":"content_filter"}],
 				"usage":{"completion_tokens":5,"prompt_tokens":7,"total_tokens":12}}`,
 		},
 		{
@@ -295,7 +322,7 @@ func TestStreamParts(t *testing.T) {
 			trace: `
 				0 response.created in_progress
 				1 response.completed 0 items`,
-			reply: `{"choices":[{"message":{"content":""},"finish_reason":"stop"}],
+			reply: `{"id":"chatcmpl-1","choices":[{"message":{"content":""},"finish_reason":"stop"}],
 				"usage":{"completion_tokens":5,"prompt_tokens":7,"total_tokens":12}}`,
 		},
 	}
@@ -313,6 +340,26 @@ func TestStreamParts(t *testing.T) {
 			assertResponse(t, fold(t, r.events), want)
 		})
 	}
+}
+
+// TestStreamNoReplyID wants a stream whose chunks carry no id to give its message no id, as
+// DecodeResponse gives the same reply: there is nothing to derive one from.
+func TestStreamNoReplyID(t *testing.T) {
+	noID := func(chunk string) string { return strings.Replace(chunk, `"id":"chatcmpl-1",`, "", 1) }
+	r := decodeStream(t, stream(noID(delta(`{"content":"Paris"}`, "")), noID(delta(`{}`, "stop")), "[DONE]"))
+	if r.err != nil {
+		t.Fatalf("stream error: %v", r.err)
+	}
+	for _, e := range r.events {
+		if d, ok := e.(protocol.OutputTextDelta); ok && d.ItemID != "" {
+			t.Errorf("output_text.delta item_id = %q, want none", d.ItemID)
+		}
+	}
+	want, err := decode(`{"choices":[{"message":{"content":"Paris"},"finish_reason":"stop"}]}`)
+	if err != nil {
+		t.Fatalf("DecodeResponse: %v", err)
+	}
+	assertResponse(t, fold(t, r.events), want)
 }
 
 // TestStreamEnd covers how a stream ends: at [DONE], or at the stream's end once the
@@ -376,6 +423,8 @@ func TestStreamRefusesChunk(t *testing.T) {
 		{"unknown finish_reason", []string{text, delta(`{}`, "tired")}, `unknown finish_reason "tired"`},
 		{"delta after the finish_reason", []string{delta(`{}`, "stop"), text}, "delta after the finish_reason"},
 		{"second finish_reason", []string{text, delta(`{}`, "stop"), delta(`{}`, "stop")}, "a second finish_reason"},
+		{"chunk of another reply", []string{text, strings.Replace(text, "chatcmpl-1", "chatcmpl-2", 1)}, `chunk of reply "chatcmpl-2" in the stream of reply "chatcmpl-1"`},
+		{"chunk of no id after one of an id", []string{text, strings.Replace(text, `"id":"chatcmpl-1",`, "", 1)}, `chunk of reply "" in the stream of reply "chatcmpl-1"`},
 		{"event after [DONE]", []string{text, delta(`{}`, "stop"), "[DONE]", usageChunk}, "event after the end of the stream"},
 	}
 	for _, tc := range cases {

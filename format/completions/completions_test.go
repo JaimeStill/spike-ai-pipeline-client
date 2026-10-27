@@ -701,10 +701,12 @@ func TestDecode(t *testing.T) {
 			want: &protocol.Response{
 				Output: []protocol.Item{
 					protocol.Reasoning{
+						ID:               "chatcmpl-1/0",
 						Content:          []protocol.ReasoningText{{Text: "The user asks."}},
 						EncryptedContent: envelopeUserAsks,
 					},
 					protocol.Message{
+						ID:      "chatcmpl-1/1",
 						Status:  protocol.StatusCompleted,
 						Role:    protocol.RoleAssistant,
 						Content: []protocol.ContentPart{protocol.OutputText{Text: "Paris"}},
@@ -715,22 +717,24 @@ func TestDecode(t *testing.T) {
 			},
 		},
 		{
-			name: "reasoning first, then the message and the calls",
-			reply: `{"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant",
+			name: "reasoning first, then the message and the calls, each its id from the reply's",
+			reply: `{"id":"chatcmpl-2","choices":[{"finish_reason":"tool_calls","message":{"role":"assistant",
 				"content":"Checking.","reasoning_content":"Need the weather tool.",
 				"tool_calls":[{"id":"c1","type":"function","function":{"name":"get_weather","arguments":"{}"}}]}}]}`,
 			want: &protocol.Response{
 				Output: []protocol.Item{
 					protocol.Reasoning{
+						ID:               "chatcmpl-2/0",
 						Content:          []protocol.ReasoningText{{Text: "Need the weather tool."}},
 						EncryptedContent: envelopeWeatherTool,
 					},
 					protocol.Message{
+						ID:      "chatcmpl-2/1",
 						Status:  protocol.StatusCompleted,
 						Role:    protocol.RoleAssistant,
 						Content: []protocol.ContentPart{protocol.OutputText{Text: "Checking."}},
 					},
-					protocol.FunctionCall{Status: protocol.StatusCompleted, CallID: "c1", Name: "get_weather", Arguments: "{}"},
+					protocol.FunctionCall{ID: "chatcmpl-2/2", Status: protocol.StatusCompleted, CallID: "c1", Name: "get_weather", Arguments: "{}"},
 				},
 				Status: protocol.StatusCompleted,
 			},
@@ -833,7 +837,7 @@ func TestDecode(t *testing.T) {
 			},
 		},
 		{
-			name: "first choice only",
+			name: "first choice only, and no id, so no item ids",
 			reply: `{"choices":[{"message":{"content":"one"},"finish_reason":"stop"},
 				{"message":{"content":"two"},"finish_reason":"length"}]}`,
 			want: &protocol.Response{

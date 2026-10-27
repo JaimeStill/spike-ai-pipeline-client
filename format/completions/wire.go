@@ -159,6 +159,8 @@ type refusalPart struct {
 // response is the part of a Chat Completions response body the format reads. Members it
 // doesn't read, such as llama.cpp's timings, are ignored.
 type response struct {
+	// ID is the reply's id, such as chatcmpl-abc, from which the format derives its items' ids.
+	ID      string `json:"id"`
 	Choices []struct {
 		Message struct {
 			Content          string     `json:"content"`
@@ -186,6 +188,8 @@ type usage struct {
 // it, with stream_options.include_usage the last, of no choices. Members it doesn't read, such
 // as llama.cpp's timings, are ignored.
 type chunk struct {
+	// ID is the reply's id, which every chunk of the stream repeats.
+	ID      string `json:"id"`
 	Choices []struct {
 		Index int `json:"index"`
 		Delta struct {

@@ -16,7 +16,10 @@ type Item interface {
 // and InputAudio parts; system and developer messages hold InputText parts, as the spec allows
 // them no other; assistant messages hold OutputText and Refusal parts.
 type Message struct {
-	// ID is the item's id, when the format supplies one. Chat Completions doesn't.
+	// ID is the item's id in a response's output, which the spec requires there and the
+	// streaming events carry as their item id. A format whose API supplies none derives it, as
+	// completions does from the reply's id and the item's output index; it is empty when the
+	// format has nothing to derive it from.
 	ID string
 	// Status is the item's status in a response's output, when the format supplies one. It is
 	// ignored on input.
@@ -133,7 +136,10 @@ func (Refusal) contentPart() {}
 // declared. It comes back in a response's Output, and goes back in the next request's Input,
 // ahead of the FunctionCallOutput that answers it.
 type FunctionCall struct {
-	// ID is the item's id, when the format supplies one. Chat Completions doesn't.
+	// ID is the item's id in a response's output, which the spec requires there and the
+	// streaming events carry as their item id. A format whose API supplies none derives it, as
+	// completions does from the reply's id and the item's output index; it is empty when the
+	// format has nothing to derive it from.
 	ID string
 	// Status is the item's status in a response's output, when the format supplies one. It is
 	// ignored on input.
@@ -187,7 +193,10 @@ func (FunctionCallOutput) item() {}
 //
 // The spec gives the reasoning item no status, so Reasoning has none.
 type Reasoning struct {
-	// ID is the item's id, when the format supplies one. Chat Completions doesn't.
+	// ID is the item's id in a response's output, which the spec requires there and the
+	// streaming events carry as their item id. A format whose API supplies none derives it, as
+	// completions does from the reply's id and the item's output index; it is empty when the
+	// format has nothing to derive it from.
 	ID string
 	// Content is the reasoning the model produced, as reasoning_text parts, when the format
 	// supplies it. It is output only: on input it is ignored and never sent.
