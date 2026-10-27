@@ -4,7 +4,8 @@ package protocol
 type Response struct {
 	// Output is what the model produced, in order.
 	Output []Item
-	// Status is StatusCompleted, or StatusIncomplete when the model stopped early.
+	// Status is StatusCompleted, or StatusIncomplete when the model stopped early. A streamed
+	// response is StatusInProgress until its stream finishes.
 	Status Status
 	// IncompleteDetails says why the response is incomplete. It is nil when it is complete.
 	IncompleteDetails *IncompleteDetails

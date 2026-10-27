@@ -221,6 +221,9 @@ type Status string
 
 // The statuses a stateless response and its items take.
 const (
+	// StatusInProgress is a response or item the model is still producing: one a stream has
+	// begun and not finished.
+	StatusInProgress Status = "in_progress"
 	// StatusCompleted is a response or item the model finished.
 	StatusCompleted Status = "completed"
 	// StatusIncomplete is a response or item the model stopped before finishing; a response's
