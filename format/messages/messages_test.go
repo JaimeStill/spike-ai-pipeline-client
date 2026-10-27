@@ -1,7 +1,9 @@
 package messages_test
 
 import (
+	"encoding/base64"
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -71,6 +73,18 @@ func assistant(parts ...protocol.ContentPart) protocol.Message {
 	return protocol.Message{Role: protocol.RoleAssistant, Content: parts}
 }
 
+// withNative returns req with native as its Native.
+func withNative(req *protocol.Request, native string) *protocol.Request {
+	req.Native = jsontext.Value(native)
+	return req
+}
+
+// seal returns the messages format's envelope of the JSON text e, as DecodeResponse writes it
+// into a reasoning item's encrypted_content.
+func seal(e string) string {
+	return "spike-ai-pipeline:messages/v1:" + base64.StdEncoding.EncodeToString([]byte(e))
+}
+
 // ask is a request to model m of the input items, bounded at 64 output tokens.
 func ask(input ...protocol.Item) *protocol.Request {
 	return &protocol.Request{Model: "m", Input: input, MaxOutputTokens: 64}
@@ -91,7 +105,7 @@ func TestEncode(t *testing.T) {
 		{
 			name: "model, max_tokens, and a user message of one text block",
 			req:  ask(text(protocol.RoleUser, "hi")),
-			want: `{"model":"m","max_tokens":64,"messages":[
+			want: `{"model":"m","max_tokens":64,"stream":false,"messages":[
 				{"role":"user","content":[{"type":"text","text":"hi"}]}]}`,
 		},
 		{
@@ -102,7 +116,7 @@ func TestEncode(t *testing.T) {
 				Input:           []protocol.Item{text(protocol.RoleUser, "Capital of France?")},
 				MaxOutputTokens: 512,
 			},
-			want: `{"model":"m","max_tokens":512,"system":"Answer in one word.","messages":[
+			want: `{"model":"m","max_tokens":512,"stream":false,"system":"Answer in one word.","messages":[
 				{"role":"user","content":[{"type":"text","text":"Capital of France?"}]}]}`,
 		},
 		{
@@ -114,7 +128,7 @@ func TestEncode(t *testing.T) {
 				text(protocol.RoleDeveloper, "d"),
 				text(protocol.RoleUser, "u2"),
 			),
-			want: `{"model":"m","max_tokens":64,"messages":[
+			want: `{"model":"m","max_tokens":64,"stream":false,"messages":[
 				{"role":"user","content":[{"type":"text","text":"u"}]},
 				{"role":"system","content":[{"type":"text","text":"s"}]},
 				{"role":"assistant","content":[{"type":"text","text":"a"}]},
@@ -126,7 +140,7 @@ func TestEncode(t *testing.T) {
 			req: ask(protocol.Message{Role: protocol.RoleUser, Content: []protocol.ContentPart{
 				protocol.InputText{Text: "one"}, protocol.InputText{Text: "two"},
 			}}),
-			want: `{"model":"m","max_tokens":64,"messages":[{"role":"user","content":[
+			want: `{"model":"m","max_tokens":64,"stream":false,"messages":[{"role":"user","content":[
 				{"type":"text","text":"one"},{"type":"text","text":"two"}]}]}`,
 		},
 		{
@@ -136,7 +150,7 @@ func TestEncode(t *testing.T) {
 				assistant(protocol.OutputText{Text: "Partly:"}, protocol.Refusal{Refusal: "not that"}),
 				text(protocol.RoleUser, "ok"),
 			),
-			want: `{"model":"m","max_tokens":64,"messages":[
+			want: `{"model":"m","max_tokens":64,"stream":false,"messages":[
 				{"role":"user","content":[{"type":"text","text":"q"}]},
 				{"role":"assistant","content":[{"type":"text","text":"Partly:"},{"type":"text","text":"not that"}]},
 				{"role":"user","content":[{"type":"text","text":"ok"}]}]}`,
@@ -150,7 +164,7 @@ func TestEncode(t *testing.T) {
 					Detail:   protocol.ImageDetailLow,
 				},
 			}}),
-			want: `{"model":"m","max_tokens":64,"messages":[{"role":"user","content":[
+			want: `{"model":"m","max_tokens":64,"stream":false,"messages":[{"role":"user","content":[
 				{"type":"text","text":"Describe this image."},
 				{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgo="}}]}]}`,
 		},
@@ -159,7 +173,7 @@ func TestEncode(t *testing.T) {
 			req: ask(protocol.Message{Role: protocol.RoleUser, Content: []protocol.ContentPart{
 				protocol.InputImage{ImageURL: "data:image/jpeg;name=a.jpg;base64,/9j/"},
 			}}),
-			want: `{"model":"m","max_tokens":64,"messages":[{"role":"user","content":[
+			want: `{"model":"m","max_tokens":64,"stream":false,"messages":[{"role":"user","content":[
 				{"type":"image","source":{"type":"base64","media_type":"image/jpeg","data":"/9j/"}}]}]}`,
 		},
 		{
@@ -167,7 +181,7 @@ func TestEncode(t *testing.T) {
 			req: ask(protocol.Message{Role: protocol.RoleUser, Content: []protocol.ContentPart{
 				protocol.InputImage{ImageURL: "https://example.com/shapes.png", Detail: protocol.ImageDetailHigh},
 			}}),
-			want: `{"model":"m","max_tokens":64,"messages":[{"role":"user","content":[
+			want: `{"model":"m","max_tokens":64,"stream":false,"messages":[{"role":"user","content":[
 				{"type":"image","source":{"type":"url","url":"https://example.com/shapes.png"}}]}]}`,
 		},
 	}
@@ -198,14 +212,21 @@ func TestEncodeRefuses(t *testing.T) {
 		{"data URL not base64", image("data:image/png,%89PNG"), "input 0: content 0: image data URL isn't base64"},
 		{"data URL of no media type", image("data:;base64,iVBORw0KGgo="), "image data URL has no media type"},
 		{"data URL of no data", image("data:image/png;base64"), "image data URL has no data"},
-		{"function_call", ask(user, protocol.FunctionCall{CallID: "c1", Name: "f", Arguments: "{}"}),
-			"input 1: item protocol.FunctionCall is not yet supported"},
-		{"tools", &protocol.Request{Model: "m", Input: []protocol.Item{user}, MaxOutputTokens: 64,
-			Tools: []protocol.FunctionTool{{Name: "f"}}}, "tools are not yet supported"},
-		{"reasoning effort", &protocol.Request{Model: "m", Input: []protocol.Item{user}, MaxOutputTokens: 64,
-			Reasoning: protocol.ReasoningParam{Effort: protocol.ReasoningEffortLow}}, "a reasoning effort is not yet supported"},
-		{"native", &protocol.Request{Model: "m", Input: []protocol.Item{user}, MaxOutputTokens: 64,
-			Native: jsontext.Value(`{"temperature":0}`)}, "native members are not yet supported"},
+		{"native stream", withNative(ask(user), `{"stream":true}`),
+			"native member stream clashes with a member the request sets"},
+		{"native max_tokens", withNative(ask(user), `{"max_tokens":8}`),
+			"native member max_tokens clashes with a member the request sets"},
+		{"native tools beside typed tools", withNative(&protocol.Request{Model: "m", Input: []protocol.Item{user},
+			MaxOutputTokens: 64, Tools: []protocol.FunctionTool{{Name: "f"}}}, `{"tools":[]}`),
+			"native member tools clashes with a member the request sets"},
+		{"native output_config beside a typed effort", withNative(&protocol.Request{Model: "m", Input: []protocol.Item{user},
+			MaxOutputTokens: 64, Reasoning: protocol.ReasoningParam{Effort: protocol.ReasoningEffortHigh}},
+			`{"output_config":{"effort":"max"}}`),
+			"native member output_config clashes with a member the request sets"},
+		{"native thinking beside a typed effort", withNative(&protocol.Request{Model: "m", Input: []protocol.Item{user},
+			MaxOutputTokens: 64, Reasoning: protocol.ReasoningParam{Effort: protocol.ReasoningEffortNone}},
+			`{"thinking":{"type":"enabled","budget_tokens":1024}}`),
+			"native member thinking clashes with a member the request sets"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -234,6 +255,18 @@ func TestEncodeStreamRequestRefuses(t *testing.T) {
 	}
 }
 
+// textThinking is the thinking text of the reply recorded in testdata/text.json.
+const textThinking = `The user asks: "Name three French cities, comma-separated, nothing else." The developer says: "Answer with the names alone." So we should output three French city names, separated by commas, no extra text. So something like "Paris, Lyon, Marseille". Ensure no extra punctuation beyond commas. Probably just "Paris, Lyon, Marseille".`
+
+// quote returns s as a JSON string.
+func quote(s string) string {
+	b, err := json.Marshal(s)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}
+
 // TestDecodeRecorded decodes the router's replies recorded in testdata.
 func TestDecodeRecorded(t *testing.T) {
 	cases := []struct {
@@ -241,17 +274,51 @@ func TestDecodeRecorded(t *testing.T) {
 		want *protocol.Response
 	}{
 		{
-			// The thinking block ahead of the text is dropped, making no item.
+			// The thinking block ahead of the text is a reasoning item, its signature empty.
 			file: "text.json",
 			want: &protocol.Response{
-				Output: []protocol.Item{protocol.Message{
-					ID:      "chatcmpl-AM4P3ZlmlUsqESx8ANKHI8limmMGUALi/0",
-					Status:  protocol.StatusCompleted,
-					Role:    protocol.RoleAssistant,
-					Content: []protocol.ContentPart{protocol.OutputText{Text: "Paris, Lyon, Marseille"}},
-				}},
+				Output: []protocol.Item{
+					protocol.Reasoning{
+						ID:               "chatcmpl-AM4P3ZlmlUsqESx8ANKHI8limmMGUALi/0",
+						Status:           protocol.StatusCompleted,
+						Content:          []protocol.ReasoningText{{Text: textThinking}},
+						EncryptedContent: seal(`{"thinking":` + quote(textThinking) + `,"signature":""}`),
+					},
+					protocol.Message{
+						ID:      "chatcmpl-AM4P3ZlmlUsqESx8ANKHI8limmMGUALi/1",
+						Status:  protocol.StatusCompleted,
+						Role:    protocol.RoleAssistant,
+						Content: []protocol.ContentPart{protocol.OutputText{Text: "Paris, Lyon, Marseille"}},
+					},
+				},
 				Status: protocol.StatusCompleted,
 				Usage:  protocol.Usage{InputTokens: 91, OutputTokens: 85, TotalTokens: 176},
+			},
+		},
+		{
+			// A thinking block, then a tool_use block, its input the call's arguments.
+			file: "tool_use.json",
+			want: &protocol.Response{
+				Output: []protocol.Item{
+					protocol.Reasoning{
+						ID:      "chatcmpl-bKMb87W7SycL38XdQ1eG0n88hQUe9ctP/0",
+						Status:  protocol.StatusCompleted,
+						Content: []protocol.ReasoningText{{Text: "User asks current weather in Paris. Use function get_weather."}},
+						// The envelope's literal, pinned: base64 of
+						// {"thinking":"User asks current weather in Paris. Use function get_weather.","signature":""}.
+						EncryptedContent: "spike-ai-pipeline:messages/v1:" +
+							"eyJ0aGlua2luZyI6IlVzZXIgYXNrcyBjdXJyZW50IHdlYXRoZXIgaW4gUGFyaXMuIFVzZSBmdW5jdGlvbiBnZXRfd2VhdGhlci4iLCJzaWduYXR1cmUiOiIifQ==",
+					},
+					protocol.FunctionCall{
+						ID:        "chatcmpl-bKMb87W7SycL38XdQ1eG0n88hQUe9ctP/1",
+						Status:    protocol.StatusCompleted,
+						CallID:    "tF5fMHb3Wb9oLGnjuubi2GFSlR6QPCmG",
+						Name:      "get_weather",
+						Arguments: `{"city":"Paris"}`,
+					},
+				},
+				Status: protocol.StatusCompleted,
+				Usage:  protocol.Usage{InputTokens: 138, OutputTokens: 40, TotalTokens: 178},
 			},
 		},
 		{
@@ -320,17 +387,61 @@ func TestDecode(t *testing.T) {
 			},
 		},
 		{
-			name: "runs of text split by thinking, only the last item incomplete",
+			name: "runs of text split by thinking and tool_use, only the last item incomplete",
 			reply: `{"id":"msg_2","content":[
-				{"type":"text","text":"one"},{"type":"thinking","thinking":"hm","signature":""},
+				{"type":"text","text":"one"},{"type":"thinking","thinking":"hm","signature":"sig"},
 				{"type":"text","text":"two"},{"type":"redacted_thinking","data":"x"},
+				{"type":"tool_use","id":"toolu_1","name":"f","input":{}},
 				{"type":"text","text":"three"},{"type":"text","text":"four"}],"stop_reason":"max_tokens"}`,
 			want: &protocol.Response{
 				Output: []protocol.Item{
 					msg("msg_2/0", protocol.StatusCompleted, "one"),
-					msg("msg_2/1", protocol.StatusCompleted, "two"),
-					msg("msg_2/2", protocol.StatusIncomplete, "three", "four"),
+					protocol.Reasoning{
+						ID:               "msg_2/1",
+						Status:           protocol.StatusCompleted,
+						Content:          []protocol.ReasoningText{{Text: "hm"}},
+						EncryptedContent: "spike-ai-pipeline:messages/v1:eyJ0aGlua2luZyI6ImhtIiwic2lnbmF0dXJlIjoic2lnIn0=",
+					},
+					msg("msg_2/2", protocol.StatusCompleted, "two"),
+					protocol.Reasoning{
+						ID:               "msg_2/3",
+						Status:           protocol.StatusCompleted,
+						EncryptedContent: "spike-ai-pipeline:messages/v1:eyJkYXRhIjoieCJ9",
+					},
+					protocol.FunctionCall{ID: "msg_2/4", Status: protocol.StatusCompleted, CallID: "toolu_1", Name: "f", Arguments: "{}"},
+					msg("msg_2/5", protocol.StatusIncomplete, "three", "four"),
 				},
+				Status:            protocol.StatusIncomplete,
+				IncompleteDetails: &protocol.IncompleteDetails{Reason: protocol.ReasonMaxOutputTokens},
+			},
+		},
+		{
+			name: "a reply ending in tool_use, the call taking the status",
+			reply: `{"id":"msg_5","content":[
+				{"type":"tool_use","id":"toolu_1","name":"get_weather","input":{"city":"Paris"}},
+				{"type":"tool_use","id":"toolu_2","name":"get_time","input":{ "city" : "Paris" }}],
+				"stop_reason":"max_tokens"}`,
+			want: &protocol.Response{
+				Output: []protocol.Item{
+					protocol.FunctionCall{ID: "msg_5/0", Status: protocol.StatusCompleted, CallID: "toolu_1",
+						Name: "get_weather", Arguments: `{"city":"Paris"}`},
+					protocol.FunctionCall{ID: "msg_5/1", Status: protocol.StatusIncomplete, CallID: "toolu_2",
+						Name: "get_time", Arguments: `{ "city" : "Paris" }`},
+				},
+				Status:            protocol.StatusIncomplete,
+				IncompleteDetails: &protocol.IncompleteDetails{Reason: protocol.ReasonMaxOutputTokens},
+			},
+		},
+		{
+			name:  "a reply ending in thinking, the reasoning taking the status",
+			reply: `{"id":"msg_6","content":[{"type":"thinking","thinking":"hm","signature":"sig"}],"stop_reason":"max_tokens"}`,
+			want: &protocol.Response{
+				Output: []protocol.Item{protocol.Reasoning{
+					ID:               "msg_6/0",
+					Status:           protocol.StatusIncomplete,
+					Content:          []protocol.ReasoningText{{Text: "hm"}},
+					EncryptedContent: "spike-ai-pipeline:messages/v1:eyJ0aGlua2luZyI6ImhtIiwic2lnbmF0dXJlIjoic2lnIn0=",
+				}},
 				Status:            protocol.StatusIncomplete,
 				IncompleteDetails: &protocol.IncompleteDetails{Reason: protocol.ReasonMaxOutputTokens},
 			},
@@ -423,8 +534,8 @@ func TestDecodeRefusesReply(t *testing.T) {
 		{"pause_turn", `{"content":[{"type":"text","text":"x"}],"stop_reason":"pause_turn"}`, `unknown stop_reason "pause_turn"`},
 		{"unknown stop_reason", `{"content":[{"type":"text","text":"x"}],"stop_reason":"length"}`, `unknown stop_reason "length"`},
 		{"null stop_reason", `{"content":[{"type":"text","text":"x"}],"stop_reason":null}`, `unknown stop_reason ""`},
-		{"block of unknown type", `{"content":[{"type":"text","text":"x"},{"type":"tool_use","id":"t1","name":"f","input":{}}],
-			"stop_reason":"tool_use"}`, `content block 1 has unknown type "tool_use"`},
+		{"block of unknown type", `{"content":[{"type":"text","text":"x"},{"type":"server_tool_use","id":"t1","name":"web_search","input":{}}],
+			"stop_reason":"end_turn"}`, `content block 1 has unknown type "server_tool_use"`},
 		{"not JSON", `Paris`, "decode response"},
 	}
 	for _, tc := range cases {

@@ -63,14 +63,22 @@ func chatCompletions(t *testing.T) *client.Client {
 	return newClient(t, completions.New())
 }
 
-// formats are the formats a scenario runs through with eachFormat, by name: the router serves
-// both, each at its own route.
-var formats = []struct {
+// testFormat is a format a scenario runs through: its name, its constructor, and whether the
+// router drops the hints a scenario records rather than asserts for it.
+type testFormat struct {
 	name string
 	new  func() format.Format
-}{
-	{"completions", func() format.Format { return completions.New() }},
-	{"messages", func() format.Format { return messages.New() }},
+	// dropsHints is set when the router drops the format's structured output, named and none
+	// tool choices, and reasoning effort before they reach the model, as it drops Messages'
+	// output_config and treats its named and none tool choices as any and none at all.
+	dropsHints bool
+}
+
+// formats are the formats a scenario runs through with eachFormat, by name: the router serves
+// both, each at its own route.
+var formats = []testFormat{
+	{name: "completions", new: func() format.Format { return completions.New() }},
+	{name: "messages", new: func() format.Format { return messages.New() }, dropsHints: true},
 }
 
 // eachFormat runs scenario as a subtest of t for each of formats, named for the format, with a
@@ -79,10 +87,30 @@ var formats = []struct {
 // request.
 func eachFormat(t *testing.T, scenario func(t *testing.T, c *client.Client)) {
 	t.Helper()
+	eachFormatOf(t, func(t *testing.T, c *client.Client, _ testFormat) { scenario(t, c) })
+}
+
+// eachFormatOf runs scenario as eachFormat does, giving it the format too, for a scenario that
+// asserts a hint where the router keeps it and records it where the router drops it.
+func eachFormatOf(t *testing.T, scenario func(t *testing.T, c *client.Client, f testFormat)) {
+	t.Helper()
 	for _, f := range formats {
 		t.Run(f.name, func(t *testing.T) {
-			scenario(t, newClient(t, f.new()))
+			scenario(t, newClient(t, f.new()), f)
 		})
+	}
+}
+
+// hinted fails t with the message unless ok, where the router keeps f's hints; where it drops
+// them, it logs the message as recorded, not asserted, and the scenario passes either way.
+func (f testFormat) hinted(t *testing.T, ok bool, format string, args ...any) {
+	t.Helper()
+	switch {
+	case ok:
+	case f.dropsHints:
+		t.Logf("recorded, not asserted (the router drops %s's hint): "+format, append([]any{f.name}, args...)...)
+	default:
+		t.Errorf(format, args...)
 	}
 }
 

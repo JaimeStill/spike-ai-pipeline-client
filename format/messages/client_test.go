@@ -40,7 +40,7 @@ func TestGeneratePostsToMessagesWithVersionAndBearer(t *testing.T) {
 			t.Errorf("%s = %q, want [%q]", k, got, want)
 		}
 	}
-	assertJSON(t, r.Body, `{"model":"m","max_tokens":64,"messages":[{"role":"user","content":[{"type":"text","text":"hi"}]}]}`)
+	assertJSON(t, r.Body, `{"model":"m","max_tokens":64,"stream":false,"messages":[{"role":"user","content":[{"type":"text","text":"hi"}]}]}`)
 }
 
 func TestGenerateRefusesNoMaxOutputTokensBeforeTheToken(t *testing.T) {

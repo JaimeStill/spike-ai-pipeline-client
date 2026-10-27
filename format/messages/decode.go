@@ -1,6 +1,7 @@
 package messages
 
 import (
+	"encoding/base64"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -11,10 +12,20 @@ import (
 )
 
 // DecodeResponse decodes a Messages response body into output items in the order of its content
-// blocks. Each run of consecutive text blocks becomes one assistant message, its content one
-// output_text part per block, in order; any other block ends the run. Each output item gets the
-// id itemID derives from the reply's id and the item's place in the output, as Messages supplies
-// no item ids. The reply's stop_reason gives the response's status:
+// blocks:
+//
+//	thinking           a reasoning item: its content one reasoning_text part of the thinking
+//	                   text, and its encrypted_content the format's envelope holding the text
+//	                   and the signature, which EncodeRequest reads back
+//	redacted_thinking  a reasoning item of no content, its envelope holding the block's data
+//	text               an output_text part of an assistant message: each run of consecutive
+//	                   text blocks becomes one message, a part per block, in order
+//	tool_use           a function_call item: its call_id the block's id, its name the block's,
+//	                   and its arguments the block's input as JSON text
+//
+// A block of any other type is an error. Each output item gets the id itemID derives from the
+// reply's id and the item's place in the output, as Messages supplies no item ids. The reply's
+// stop_reason gives the response's status:
 //
 //	end_turn, tool_use, stop_sequence          completed
 //	max_tokens, model_context_window_exceeded  incomplete, reason max_output_tokens
@@ -24,10 +35,6 @@ import (
 // the spec has only the last item incomplete. pause_turn, which asks the caller to send the turn
 // back for the endpoint to continue, has no place in a stateless response, and is an error, as is
 // any other stop_reason.
-//
-// The format doesn't yet decode a thinking or redacted_thinking block, and drops it, so a
-// reasoning model's reply still gives its answer; it makes no item, and ends a run of text. A
-// block of any other type, tool_use among them, is an error.
 //
 // The reply's usage gives the response's: InputTokens is input_tokens with the prompt cache's
 // cache_read_input_tokens and cache_creation_input_tokens added, as Messages counts those apart
@@ -43,6 +50,8 @@ func (*Format) DecodeResponse(body []byte) (*protocol.Response, error) {
 	if resp.Status, resp.IncompleteDetails, ok = decodeStop(wire.StopReason); !ok {
 		return nil, fmt.Errorf("messages: response has unknown stop_reason %q", wire.StopReason)
 	}
+	// id is the next output item's id.
+	id := func() string { return itemID(wire.ID, len(resp.Output)) }
 	// text is the open run's message's content, nil when no run is open.
 	var text []protocol.ContentPart
 	closeRun := func() {
@@ -50,7 +59,7 @@ func (*Format) DecodeResponse(body []byte) (*protocol.Response, error) {
 			return
 		}
 		resp.Output = append(resp.Output, protocol.Message{
-			ID:      itemID(wire.ID, len(resp.Output)),
+			ID:      id(),
 			Status:  protocol.StatusCompleted,
 			Role:    protocol.RoleAssistant,
 			Content: text,
@@ -58,11 +67,27 @@ func (*Format) DecodeResponse(body []byte) (*protocol.Response, error) {
 		text = nil
 	}
 	for i, b := range wire.Content {
-		switch b.Type {
-		case "text":
+		if b.Type == "text" {
 			text = append(text, protocol.OutputText{Text: b.Text})
+			continue
+		}
+		closeRun()
+		switch b.Type {
 		case "thinking", "redacted_thinking":
-			closeRun()
+			r, err := decodeReasoning(b)
+			if err != nil {
+				return nil, fmt.Errorf("messages: response content block %d: %w", i, err)
+			}
+			r.ID = id()
+			resp.Output = append(resp.Output, r)
+		case "tool_use":
+			resp.Output = append(resp.Output, protocol.FunctionCall{
+				ID:        id(),
+				Status:    protocol.StatusCompleted,
+				CallID:    b.ID,
+				Name:      b.Name,
+				Arguments: string(b.Input),
+			})
 		default:
 			return nil, fmt.Errorf("messages: response content block %d has unknown type %q", i, b.Type)
 		}
@@ -74,11 +99,47 @@ func (*Format) DecodeResponse(body []byte) (*protocol.Response, error) {
 	return resp, nil
 }
 
+// decodeReasoning returns the reasoning item of b, a thinking or redacted_thinking block, as
+// DecodeResponse describes, completed and with no id.
+func decodeReasoning(b block) (protocol.Reasoning, error) {
+	r := protocol.Reasoning{Status: protocol.StatusCompleted}
+	var e envelope
+	if b.Type == "thinking" {
+		r.Content = []protocol.ReasoningText{{Text: b.Thinking}}
+		e = envelope{Thinking: &b.Thinking, Signature: &b.Signature}
+	} else {
+		e = envelope{Data: &b.Data}
+	}
+	sealed, err := sealEnvelope(e)
+	if err != nil {
+		return protocol.Reasoning{}, err
+	}
+	r.EncryptedContent = sealed
+	return r, nil
+}
+
+// sealEnvelope returns e in its encrypted_content layout: envelopePrefix, then e as JSON in
+// base64.
+func sealEnvelope(e envelope) (string, error) {
+	b, err := json.Marshal(e)
+	if err != nil {
+		return "", err
+	}
+	return envelopePrefix + base64.StdEncoding.EncodeToString(b), nil
+}
+
 // withStatus returns it, an output item, with status.
 func withStatus(it protocol.Item, status protocol.Status) protocol.Item {
-	if m, ok := it.(protocol.Message); ok {
-		m.Status = status
-		return m
+	switch it := it.(type) {
+	case protocol.Reasoning:
+		it.Status = status
+		return it
+	case protocol.Message:
+		it.Status = status
+		return it
+	case protocol.FunctionCall:
+		it.Status = status
+		return it
 	}
 	return it
 }

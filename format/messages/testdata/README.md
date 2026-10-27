@@ -8,6 +8,11 @@ The decode tests compare what `DecodeResponse` gives for each with the response 
   French cities, comma-separated, nothing else." with `max_tokens` 256; a thinking block, its
   signature empty, then a text block, stop_reason `end_turn`, and usage with
   `cache_read_input_tokens`.
+- `tool_use.json`: gpt-oss-120b asked "What is the weather in Paris right now?" with the tool
+  `get_weather` (its description "Get the current temperature in a city, in degrees Celsius." and
+  an object schema of a required string `city`), `tool_choice` `{"type":"any"}`, and `max_tokens`
+  1024; a thinking block, its signature empty, then a tool_use block of input `{"city":"Paris"}`,
+  stop_reason `tool_use`, sent with `stream` false as the format sends it.
 - `length.json`: Gemma 4 E4B asked "Count from 1 to 20, separated by spaces." with `max_tokens` 8;
   a text block, stop_reason `max_tokens`.
 - `conversation.json`: Gemma 4 E4B with `system` as one text block, "Answer in one word.", and the
