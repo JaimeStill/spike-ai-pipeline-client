@@ -83,6 +83,16 @@ var parseTests = []struct {
 	{"pending event at end discarded", "data: a\n\ndata: b\n", []sse.Event{{Data: "a"}}},
 	{"pending line at end discarded", "data: a\n\ndata: b", []sse.Event{{Data: "a"}}},
 	{"empty stream", "", nil},
+	// Multi-byte text, which the one-byte reader splits mid-character.
+	{"multi-byte text kept", "event: é\nid: €\ndata: h\u00e9llo \u20ac \U0001D11E\n\n", []sse.Event{{Type: "é", Data: "héllo € \U0001D11E", ID: "€"}}},
+	{"invalid byte in data replaced", "data: a\xffb\n\n", []sse.Event{{Data: "a\uFFFDb"}}},
+	{"invalid byte in event type replaced", "event: a\x80\ndata: x\n\n", []sse.Event{{Type: "a\uFFFD", Data: "x"}}},
+	{"invalid byte in id replaced", "id: 7\xfe\ndata: x\n\n", []sse.Event{{Data: "x", ID: "7\uFFFD"}}},
+	{"truncated sequence is one replacement", "data: a\xe2\x82b\n\n", []sse.Event{{Data: "a\uFFFDb"}}},
+	{"truncated sequence at line end", "data: a\xf0\x9f\x98\ndata: b\xe2\r\n\r\n", []sse.Event{{Data: "a\uFFFD\nb\uFFFD"}}},
+	{"overlong and surrogate forms replaced per byte", "data: \xc0\x80\xed\xa0\x80\n\n", []sse.Event{{Data: "\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD"}}},
+	// The Unicode Standard's example of maximal-subpart replacement (Table 3-8).
+	{"maximal subparts replaced", "data: a\xf1\x80\x80\xe1\x80\xc2b\x80c\x80\xbfd\n\n", []sse.Event{{Data: "a\uFFFD\uFFFD\uFFFDb\uFFFDc\uFFFD\uFFFDd"}}},
 }
 
 func TestNext(t *testing.T) {

@@ -3,6 +3,10 @@
 // event stream. It reads the body as the bytes arrive and holds only the event being built. It is
 // a decoder alone: it never reconnects, and it never sends Last-Event-ID.
 //
+// The stream is decoded as UTF-8 with replacement, as the standard requires: each invalid byte
+// sequence becomes one U+FFFD per maximal subpart, as the Encoding Standard's UTF-8 decoder
+// yields, so Event's fields are always valid UTF-8.
+//
 // Its exported identifiers:
 //
 //   - [Event] is one dispatched event: its type, data, and last event ID.
@@ -19,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Event is one event a stream dispatched.
@@ -35,7 +40,8 @@ type Event struct {
 	ID string
 }
 
-// Decoder reads the events of one stream. It isn't safe for concurrent use.
+// Decoder reads the events of one stream. It isn't safe for concurrent use. It decodes the
+// stream as UTF-8 with replacement, as the standard does.
 //
 // A line has no length limit: the Decoder holds a line until its ending arrives, so a stream's
 // longest line is the most it buffers. The caller bounds a stream it doesn't trust with its
@@ -81,7 +87,7 @@ func (d *Decoder) Next() (Event, error) {
 			}
 			continue
 		}
-		d.field(line)
+		d.field(decodeUTF8(line))
 	}
 }
 
@@ -129,6 +135,79 @@ func (d *Decoder) stripBOM(line []byte) []byte {
 		return bytes.TrimPrefix(line, bom)
 	}
 	return line
+}
+
+// decodeUTF8 returns line decoded as UTF-8 with replacement, by the Encoding Standard's UTF-8
+// decoder: each maximal subpart of an invalid sequence, the longest prefix of a well-formed
+// sequence, becomes one U+FFFD, and the byte that ended it is decoded afresh. A sequence cut off
+// by the line's end is one U+FFFD. Decoding a line at a time decodes the stream: a line ends at
+// CR or LF, and an ASCII byte ends any pending sequence in the whole-stream decoder too, so a
+// character split across reads is whole by the time its line is decoded. A valid line, the usual
+// one, is returned as it is.
+//
+// This is not utf8.DecodeRune's replacement, which steps one byte per invalid byte, so a
+// truncated sequence gives a U+FFFD per byte; nor bytes.ToValidUTF8's, which collapses a run of
+// invalid bytes into one.
+func decodeUTF8(line []byte) []byte {
+	if utf8.Valid(line) {
+		return line
+	}
+	out := make([]byte, 0, len(line)+2*utf8.UTFMax)
+	var (
+		cp           rune
+		needed, seen int
+		lower, upper byte = 0x80, 0xBF
+	)
+	for i := 0; i < len(line); {
+		b := line[i]
+		if needed == 0 {
+			i++
+			switch {
+			case b <= 0x7F:
+				out = append(out, b)
+			case 0xC2 <= b && b <= 0xDF:
+				needed, cp = 1, rune(b&0x1F)
+			case 0xE0 <= b && b <= 0xEF:
+				// E0 bars overlong forms; ED bars the surrogates.
+				switch b {
+				case 0xE0:
+					lower = 0xA0
+				case 0xED:
+					upper = 0x9F
+				}
+				needed, cp = 2, rune(b&0x0F)
+			case 0xF0 <= b && b <= 0xF4:
+				// F0 bars overlong forms; F4 bars code points past U+10FFFF.
+				switch b {
+				case 0xF0:
+					lower = 0x90
+				case 0xF4:
+					upper = 0x8F
+				}
+				needed, cp = 3, rune(b&0x07)
+			default:
+				out = utf8.AppendRune(out, utf8.RuneError)
+			}
+			continue
+		}
+		if b < lower || b > upper {
+			// The maximal subpart ends here; b is not consumed, and starts afresh.
+			out = utf8.AppendRune(out, utf8.RuneError)
+			cp, needed, seen, lower, upper = 0, 0, 0, 0x80, 0xBF
+			continue
+		}
+		i++
+		lower, upper = 0x80, 0xBF
+		cp = cp<<6 | rune(b&0x3F)
+		if seen++; seen == needed {
+			out = utf8.AppendRune(out, cp)
+			cp, needed, seen = 0, 0, 0
+		}
+	}
+	if needed != 0 {
+		out = utf8.AppendRune(out, utf8.RuneError)
+	}
+	return out
 }
 
 // field processes one line that isn't blank: a comment, which starts with a colon, or a field,
