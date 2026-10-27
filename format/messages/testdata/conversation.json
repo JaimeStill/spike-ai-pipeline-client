@@ -1,0 +1,1 @@
+{"id":"chatcmpl-yCOWmZF11j1jz7AcJ32cFQgRD1KScyo0","type":"message","role":"assistant","content":[{"type":"text","text":"ROME"}],"model":"ggml-org/gemma-4-E4B-it-GGUF:Q8_0","stop_reason":"end_turn","stop_sequence":null,"usage":{"cache_read_input_tokens":6,"input_tokens":48,"output_tokens":2}}

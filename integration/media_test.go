@@ -8,32 +8,35 @@ import (
 	"testing"
 	"unicode"
 
+	client "github.com/JaimeStill/spike-ai-pipeline-client"
 	"github.com/JaimeStill/spike-ai-pipeline-client/protocol"
 )
 
 func TestImageDescription(t *testing.T) {
-	c := chatCompletions(t)
-	resp, err := c.Generate(requestContext(t), &protocol.Request{
-		Model: visionModel,
-		Input: []protocol.Item{protocol.Message{Role: protocol.RoleUser, Content: []protocol.ContentPart{
-			protocol.InputText{Text: "Describe this image in one sentence."},
-			protocol.InputImage{ImageURL: protocol.DataURL("image/png", readTestdata(t, "shapes.png"))},
-		}}},
-		MaxOutputTokens: 512,
-	})
-	if err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-	text := completedText(t, resp)
-	t.Logf("%s: %q", visionModel, text)
-	// shapes.png is a red circle, a blue square, and a green triangle. Each shape must be named
-	// as a word of its own, singular or plural, in any phrasing, as the root's probe asserts.
-	words := strings.FieldsFunc(strings.ToLower(text), func(r rune) bool { return !unicode.IsLetter(r) })
-	for _, want := range []string{"circle", "square", "triangle"} {
-		if !slices.Contains(words, want) && !slices.Contains(words, want+"s") {
-			t.Errorf("the description %q doesn't name a %s", text, want)
+	eachFormat(t, func(t *testing.T, c *client.Client) {
+		resp, err := c.Generate(requestContext(t), &protocol.Request{
+			Model: visionModel,
+			Input: []protocol.Item{protocol.Message{Role: protocol.RoleUser, Content: []protocol.ContentPart{
+				protocol.InputText{Text: "Describe this image in one sentence."},
+				protocol.InputImage{ImageURL: protocol.DataURL("image/png", readTestdata(t, "shapes.png"))},
+			}}},
+			MaxOutputTokens: 512,
+		})
+		if err != nil {
+			t.Fatalf("Generate: %v", err)
 		}
-	}
+		text := completedText(t, resp)
+		t.Logf("%s: %q", visionModel, text)
+		// shapes.png is a red circle, a blue square, and a green triangle. Each shape must be
+		// named as a word of its own, singular or plural, in any phrasing, as the root's probe
+		// asserts.
+		words := strings.FieldsFunc(strings.ToLower(text), func(r rune) bool { return !unicode.IsLetter(r) })
+		for _, want := range []string{"circle", "square", "triangle"} {
+			if !slices.Contains(words, want) && !slices.Contains(words, want+"s") {
+				t.Errorf("the description %q doesn't name a %s", text, want)
+			}
+		}
+	})
 }
 
 func TestAudioInChat(t *testing.T) {

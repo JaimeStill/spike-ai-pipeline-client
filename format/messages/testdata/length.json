@@ -1,0 +1,1 @@
+{"id":"chatcmpl-RMGRO2IdNL6QNnOC6Yk1axTBpXQk3Zsk","type":"message","role":"assistant","content":[{"type":"text","text":"1 2 3 4 "}],"model":"ggml-org/gemma-4-E4B-it-GGUF:Q8_0","stop_reason":"max_tokens","stop_sequence":null,"usage":{"cache_read_input_tokens":7,"input_tokens":22,"output_tokens":8}}
