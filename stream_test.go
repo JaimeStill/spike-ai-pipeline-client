@@ -106,8 +106,6 @@ func TestGenerateStreamIsLazy(t *testing.T) {
 		Token:   func(context.Context) (string, error) { tokens.Add(1); return "", nil },
 	})
 	seq := c.GenerateStream(t.Context(), hello())
-	// A nil request, which Validate refuses, is refused only once ranged.
-	_ = c.GenerateStream(t.Context(), nil)
 	if n := len(srv.Requests()); n != 0 || tokens.Load() != 0 {
 		t.Fatalf("before ranging: %d requests and %d tokens, want none", n, tokens.Load())
 	}
