@@ -45,9 +45,9 @@ func TestStructuredOutput(t *testing.T) {
 			Country string `json:"country"`
 		}
 		err = json.Unmarshal([]byte(text), &got, json.RejectUnknownMembers(true))
-		f.hinted(t, err == nil, "output_text %q doesn't decode as the schema's object: %v", text, err)
+		f.hinted(t, err == nil, "output_text decodes as the schema's object", "output_text %q, error %v", text, err)
 		if err == nil {
-			f.hinted(t, got.Capital == "Paris" && got.Country == "France", "decoded %+v, want capital Paris, country France", got)
+			f.hinted(t, got.Capital == "Paris" && got.Country == "France", "capital Paris, country France", "decoded %+v", got)
 		}
 	})
 }

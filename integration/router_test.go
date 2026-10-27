@@ -105,17 +105,30 @@ func eachFormatOf(t *testing.T, scenario func(t *testing.T, c *client.Client, f 
 	}
 }
 
-// hinted fails t with the message unless ok, where the router keeps f's hints; where it drops
-// them, it logs the message as recorded, not asserted, and the scenario passes either way.
-func (f testFormat) hinted(t *testing.T, ok bool, msg string, args ...any) {
+// hinted checks a hint f's request carried. Where the router keeps f's hints, it fails t unless
+// ok, with the check wanted and detail. Where it drops them, it records the check's outcome,
+// held or not, with detail, and the scenario passes either way.
+func (f testFormat) hinted(t *testing.T, ok bool, check, detail string, args ...any) {
 	t.Helper()
 	switch {
-	case ok:
 	case f.dropsHints:
-		t.Logf("recorded, not asserted (the router drops %s's hint): "+msg, append([]any{f.name}, args...)...)
-	default:
-		t.Errorf(msg, args...)
+		outcome := "held"
+		if !ok {
+			outcome = "did not hold"
+		}
+		f.record(t, check+": "+outcome+"; "+detail, args...)
+	case !ok:
+		t.Errorf("want "+check+"; "+detail, args...)
 	}
+}
+
+// record logs an outcome a scenario records rather than asserts, as one line a verbose run's log
+// carries and a grep for "recorded:" finds: the format, the scenario, t's name without the
+// format's subtest, and the outcome.
+func (f testFormat) record(t *testing.T, msg string, args ...any) {
+	t.Helper()
+	scenario := strings.TrimSuffix(t.Name(), "/"+f.name)
+	t.Logf("recorded: %s %s: "+msg, append([]any{f.name, scenario}, args...)...)
 }
 
 // readTestdata returns the file name in testdata.

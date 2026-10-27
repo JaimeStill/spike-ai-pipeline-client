@@ -127,7 +127,7 @@ func TestNamedToolChoices(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			eachFormat(t, func(t *testing.T, c *client.Client) {
+			eachFormatOf(t, func(t *testing.T, c *client.Client, f testFormat) {
 				resp, err := c.Generate(requestContext(t), &protocol.Request{
 					Model:           chatModel,
 					Input:           []protocol.Item{userText("What is 2 + 2? Answer with the number alone.")},
@@ -136,7 +136,7 @@ func TestNamedToolChoices(t *testing.T) {
 					MaxOutputTokens: chatBound,
 				})
 				if err != nil {
-					t.Logf("%s: Generate error %v", tc.name, err)
+					f.record(t, "%s: Generate error %v", tc.name, err)
 					return
 				}
 				var got []string
@@ -152,7 +152,7 @@ func TestNamedToolChoices(t *testing.T) {
 						got = append(got, "function_call "+it.Name+"("+it.Arguments+")")
 					}
 				}
-				t.Logf("%s: status %s, output [%s]", tc.name, resp.Status, strings.Join(got, ", "))
+				f.record(t, "%s: status %s, output [%s]", tc.name, resp.Status, strings.Join(got, ", "))
 			})
 		})
 	}

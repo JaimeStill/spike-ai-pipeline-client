@@ -66,7 +66,7 @@ func TestReasoningRoundTrip(t *testing.T) {
 // and a model may reason as long at any effort.
 func TestReasoningEffort(t *testing.T) {
 	efforts := []protocol.ReasoningEffort{protocol.ReasoningEffortNone, protocol.ReasoningEffortLow, protocol.ReasoningEffortHigh}
-	eachFormat(t, func(t *testing.T, c *client.Client) {
+	eachFormatOf(t, func(t *testing.T, c *client.Client, f testFormat) {
 		for _, effort := range efforts {
 			resp, err := c.Generate(requestContext(t), &protocol.Request{
 				Model:           chatModel,
@@ -75,7 +75,7 @@ func TestReasoningEffort(t *testing.T) {
 				MaxOutputTokens: chatBound,
 			})
 			if err != nil {
-				t.Logf("effort %s: Generate error %v", effort, err)
+				f.record(t, "effort %s: Generate error %v", effort, err)
 				continue
 			}
 			var reasoning int
@@ -84,7 +84,7 @@ func TestReasoningEffort(t *testing.T) {
 					reasoning += len(reasoningText(r))
 				}
 			}
-			t.Logf("effort %s: status %s, %d bytes of reasoning, %d output tokens",
+			f.record(t, "effort %s: status %s, %d bytes of reasoning, %d output tokens",
 				effort, resp.Status, reasoning, resp.Usage.OutputTokens)
 		}
 	})
