@@ -16,14 +16,14 @@ import (
 )
 
 // DecodeResponse decodes a Chat Completions response body. Each output item gets the id itemID
-// derives from the reply's id and the item's place in the output, as Chat Completions supplies
-// no item ids. The first choice's message's
-// reasoning_content, when it has one, becomes a reasoning item ahead of the others: its content
-// one reasoning_text part of the text, and its encrypted_content the format's envelope holding
-// it, which EncodeRequest reads back. The message then becomes an assistant message item, its content an output_text part and its refusal a refusal part;
-// a message with neither gives no message item. Each of its tool_calls then becomes a
-// function_call item, in order, its call_id the call's id; a call of a type other than function
-// is an error. The first choice's finish_reason gives the response's status:
+// derives from the reply's id and the item's place in the output, as Chat Completions supplies no
+// item ids. The first choice's message's reasoning_content, when it has one, becomes a reasoning
+// item ahead of the others: its content one reasoning_text part of the text, and its
+// encrypted_content the format's envelope holding it, which EncodeRequest reads back. The message
+// then becomes an assistant message item, its content an output_text part and its refusal a refusal
+// part; a message with neither gives no message item. Each of its tool_calls then becomes a
+// function_call item, in order, its call_id the call's id; a call of a type other than function is
+// an error. The first choice's finish_reason gives the response's status:
 //
 //	stop, tool_calls  completed
 //	length            incomplete, reason max_output_tokens
@@ -170,20 +170,18 @@ func (*Format) DecodeError(body []byte) (message, typ, code string) {
 }
 
 // NewStreamDecoder returns a decoder for one streamed Chat Completions reply: a stream of
-// chat.completion.chunk events, which it turns into the protocol's streaming events in the
-// spec's order. Chat Completions names no event types: every event's data is a chunk, or the
-// [DONE] that ends the stream. Of each chunk it reads the id, the first choice, index 0, and the usage.
+// chat.completion.chunk events, which it turns into the protocol's streaming events in the spec's
+// order. Chat Completions names no event types: every event's data is a chunk, or the [DONE] that
+// ends the stream. Of each chunk it reads the id, the first choice, index 0, and the usage.
 //
-// The first event opens the stream with response.created, its response in_progress. The
-// choice's reasoning_content deltas make the reasoning item, first in the output, as
-// DecodeResponse orders it: output_item.added, in progress and with no content, when the first
-// of them arrives, then its one reasoning_text part, with content_part.added, a reasoning.delta
-// for each, and at its close reasoning.done and content_part.done, and output_item.done carrying
-// the whole item.
-// The item closes when the message's content, or the first tool call, begins, or at the
-// finish_reason, and its output_item.done carries the encrypted_content envelope DecodeResponse
-// gives the same reasoning, which EncodeRequest reads back, so the folded Response can be sent
-// back as it came.
+// The first event opens the stream with response.created, its response in_progress. The choice's
+// reasoning_content deltas make the reasoning item, first in the output, as DecodeResponse orders
+// it: output_item.added, in progress and with no content, when the first of them arrives, then its
+// one reasoning_text part, with content_part.added, a reasoning.delta for each, and at its close
+// reasoning.done and content_part.done, and output_item.done carrying the whole item. The item
+// closes when the message's content, or the first tool call, begins, or at the finish_reason, and
+// its output_item.done carries the encrypted_content envelope DecodeResponse gives the same
+// reasoning, which EncodeRequest reads back, so the folded Response can be sent back as it came.
 //
 // The choice's content and refusal deltas then make the assistant message: output_item.added, in
 // progress, when the first of them arrives; then for each run of content, or of refusal, a
@@ -225,11 +223,11 @@ func (*Format) DecodeError(body []byte) (message, typ, code string) {
 // frame as the first event follows response.created, which every stream opens with, and an
 // event after the frame is an error, as one after [DONE] is.
 //
-// A chunk that isn't JSON, an unknown finish_reason, a delta after the finish_reason, or an
-// event after [DONE] is an error. The
-// stream's id is its first chunk's, which every chunk repeats; a chunk with another id is an
-// error. Each item's id, its events' item_id, is the one DecodeResponse gives it: itemID derives
-// it from the stream's id and the item's output index, as Chat Completions supplies no item ids.
+// A chunk that isn't JSON, an unknown finish_reason, a delta after the finish_reason, or an event
+// after [DONE] is an error. The stream's id is its first chunk's, which every chunk repeats; a
+// chunk with another id is an error. Each item's id, its events' item_id, is the one DecodeResponse
+// gives it: itemID derives it from the stream's id and the item's output index, as Chat Completions
+// supplies no item ids.
 func (*Format) NewStreamDecoder() format.StreamDecoder {
 	return &streamDecoder{}
 }

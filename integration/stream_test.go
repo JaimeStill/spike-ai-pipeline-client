@@ -161,8 +161,9 @@ func TestStreamReasoningRoundTrip(t *testing.T) {
 }
 
 // TestStreamCancel streams a long answer and cancels the context once a few output_text deltas
-// have arrived. It wants the sequence to end at once with the context's error, and the
-// accumulated Response in progress, its message holding the text the deltas made so far.
+// have arrived. It wants no event after the cancel, the context's error as the sequence's one
+// error, and the accumulated Response in progress, its message holding the text the deltas made
+// so far. How long after the cancel the sequence ended is logged, not asserted.
 func TestStreamCancel(t *testing.T) {
 	const cancelAt = 5
 	ctx, cancel := context.WithCancel(requestContext(t))

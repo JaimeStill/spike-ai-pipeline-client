@@ -442,7 +442,7 @@ func (a *Accumulator) textPart(itemID string, output, content int, kind ContentP
 	return p, nil
 }
 
-// itemID returns it's id, empty for an item the accumulator doesn't fold.
+// itemID returns the id of it, an output item, empty for an item the accumulator doesn't fold.
 func itemID(it Item) string {
 	switch it := it.(type) {
 	case Message:

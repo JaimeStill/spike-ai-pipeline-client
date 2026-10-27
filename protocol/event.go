@@ -13,12 +13,11 @@ package protocol
 // as OutputTextDelta, never a pointer to one.
 //
 // Every event carries its SequenceNumber, which increases through the stream. An event about an
-// output item carries the item's OutputIndex, its place in the Response's Output; an event about
-// a content part, or about a function call's arguments, carries the item's ItemID, the ID of the
-// item as added; and an event about a content part carries the part's ContentIndex, its place in
-// the item's content. The spec requires the item id there; a format
-// whose API supplies none derives one, as completions does, and leaves it empty only when it has
-// nothing to derive it from.
+// output item carries the item's OutputIndex, its place in the Response's Output; an event about a
+// content part, or about a function call's arguments, carries the item's ItemID, the ID of the item
+// as added; and an event about a content part carries the part's ContentIndex, its place in the
+// item's content. The spec requires the item id there; a format whose API supplies none derives
+// one, as completions does, and leaves it empty only when it has nothing to derive it from.
 type Event interface {
 	event()
 }
