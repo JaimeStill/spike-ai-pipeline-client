@@ -443,10 +443,8 @@ func (d *streamDecoder) messageDelta(stopReason string, outputTokens int) error 
 		return errors.New("a second message_delta")
 	}
 	for i, it := range d.items {
-		for _, b := range it.blocks {
-			if !b.stopped {
-				return fmt.Errorf("message_delta while a content block of output %d is open", i)
-			}
+		if !it.stoppedAll() {
+			return fmt.Errorf("message_delta while a content block of output %d is open", i)
 		}
 	}
 	var ok bool
@@ -493,17 +491,23 @@ func (it *streamItem) stoppedAll() bool {
 	return true
 }
 
+// content returns a message's parts, an output_text of each of its blocks' text so far, in
+// order.
+func (it *streamItem) content() []protocol.ContentPart {
+	content := make([]protocol.ContentPart, len(it.blocks))
+	for i, b := range it.blocks {
+		content[i] = protocol.OutputText{Text: b.text.String()}
+	}
+	return content
+}
+
 // closeItem makes it's output_item.done, carrying the whole item, of status: the item
 // DecodeResponse makes of the same blocks.
 func (d *streamDecoder) closeItem(it *streamItem, status protocol.Status) error {
 	first := it.blocks[0]
 	switch first.typ {
 	case "text":
-		content := make([]protocol.ContentPart, len(it.blocks))
-		for i, b := range it.blocks {
-			content[i] = protocol.OutputText{Text: b.text.String()}
-		}
-		it.item = protocol.Message{ID: it.id, Status: status, Role: protocol.RoleAssistant, Content: content}
+		it.item = protocol.Message{ID: it.id, Status: status, Role: protocol.RoleAssistant, Content: it.content()}
 	case "thinking", "redacted_thinking":
 		r, err := decodeReasoning(block{Type: first.typ, Thinking: first.text.String(), Signature: first.signature, Data: first.data})
 		if err != nil {
@@ -587,11 +591,7 @@ func (d *streamDecoder) output() []protocol.Item {
 		first := it.blocks[0]
 		switch first.typ {
 		case "text":
-			content := make([]protocol.ContentPart, len(it.blocks))
-			for i, b := range it.blocks {
-				content[i] = protocol.OutputText{Text: b.text.String()}
-			}
-			out = append(out, protocol.Message{ID: it.id, Status: protocol.StatusInProgress, Role: protocol.RoleAssistant, Content: content})
+			out = append(out, protocol.Message{ID: it.id, Status: protocol.StatusInProgress, Role: protocol.RoleAssistant, Content: it.content()})
 		case "thinking":
 			out = append(out, protocol.Reasoning{ID: it.id, Status: protocol.StatusInProgress, Content: []protocol.ReasoningText{{Text: first.text.String()}}})
 		case "redacted_thinking":
