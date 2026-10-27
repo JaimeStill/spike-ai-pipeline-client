@@ -12,14 +12,6 @@ import (
 // outputs, reasoning sent back, tools and the tool choice, reasoning effort, the text format, and
 // the native tier.
 
-// thinkingEnvelope is the envelope of a thinking block of text "hm" and signature "sig", as
-// DecodeResponse writes it: base64 of {"thinking":"hm","signature":"sig"}.
-const thinkingEnvelope = "spike-ai-pipeline:messages/v1:eyJ0aGlua2luZyI6ImhtIiwic2lnbmF0dXJlIjoic2lnIn0="
-
-// redactedEnvelope is the envelope of a redacted_thinking block of data "x": base64 of
-// {"data":"x"}.
-const redactedEnvelope = "spike-ai-pipeline:messages/v1:eyJkYXRhIjoieCJ9"
-
 func call(id, name, args string) protocol.FunctionCall {
 	return protocol.FunctionCall{CallID: id, Name: name, Arguments: args}
 }

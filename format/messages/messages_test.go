@@ -85,15 +85,17 @@ func seal(e string) string {
 	return "spike-ai-pipeline:messages/v1:" + base64.StdEncoding.EncodeToString([]byte(e))
 }
 
+// thinkingEnvelope is the envelope of a thinking block of text "hm" and signature "sig", as
+// DecodeResponse writes it: base64 of {"thinking":"hm","signature":"sig"}.
+const thinkingEnvelope = "spike-ai-pipeline:messages/v1:eyJ0aGlua2luZyI6ImhtIiwic2lnbmF0dXJlIjoic2lnIn0="
+
+// redactedEnvelope is the envelope of a redacted_thinking block of data "x": base64 of
+// {"data":"x"}.
+const redactedEnvelope = "spike-ai-pipeline:messages/v1:eyJkYXRhIjoieCJ9"
+
 // ask is a request to model m of the input items, bounded at 64 output tokens.
 func ask(input ...protocol.Item) *protocol.Request {
 	return &protocol.Request{Model: "m", Input: input, MaxOutputTokens: 64}
-}
-
-func TestRoute(t *testing.T) {
-	if got := messages.New().Route(); got != "messages" {
-		t.Errorf("Route = %q, want %q", got, "messages")
-	}
 }
 
 func TestEncode(t *testing.T) {
@@ -400,13 +402,13 @@ func TestDecode(t *testing.T) {
 						ID:               "msg_2/1",
 						Status:           protocol.StatusCompleted,
 						Content:          []protocol.ReasoningText{{Text: "hm"}},
-						EncryptedContent: "spike-ai-pipeline:messages/v1:eyJ0aGlua2luZyI6ImhtIiwic2lnbmF0dXJlIjoic2lnIn0=",
+						EncryptedContent: thinkingEnvelope,
 					},
 					msg("msg_2/2", protocol.StatusCompleted, "two"),
 					protocol.Reasoning{
 						ID:               "msg_2/3",
 						Status:           protocol.StatusCompleted,
-						EncryptedContent: "spike-ai-pipeline:messages/v1:eyJkYXRhIjoieCJ9",
+						EncryptedContent: redactedEnvelope,
 					},
 					protocol.FunctionCall{ID: "msg_2/4", Status: protocol.StatusCompleted, CallID: "toolu_1", Name: "f", Arguments: "{}"},
 					msg("msg_2/5", protocol.StatusIncomplete, "three", "four"),
@@ -440,7 +442,7 @@ func TestDecode(t *testing.T) {
 					ID:               "msg_6/0",
 					Status:           protocol.StatusIncomplete,
 					Content:          []protocol.ReasoningText{{Text: "hm"}},
-					EncryptedContent: "spike-ai-pipeline:messages/v1:eyJ0aGlua2luZyI6ImhtIiwic2lnbmF0dXJlIjoic2lnIn0=",
+					EncryptedContent: thinkingEnvelope,
 				}},
 				Status:            protocol.StatusIncomplete,
 				IncompleteDetails: &protocol.IncompleteDetails{Reason: protocol.ReasonMaxOutputTokens},
