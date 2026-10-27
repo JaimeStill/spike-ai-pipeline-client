@@ -3,9 +3,12 @@
 package integration_test
 
 import (
+	"context"
 	"encoding/json/v2"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/JaimeStill/spike-ai-pipeline-client/protocol"
 )
@@ -155,4 +158,61 @@ func TestStreamReasoningRoundTrip(t *testing.T) {
 	if !strings.Contains(answer, "17") {
 		t.Errorf("the answer %q doesn't use the tool's temperature, 17", answer)
 	}
+}
+
+// TestStreamCancel streams a long answer and cancels the context once a few output_text deltas
+// have arrived. It wants the sequence to end at once with the context's error, and the
+// accumulated Response in progress, its message holding the text the deltas made so far.
+func TestStreamCancel(t *testing.T) {
+	const cancelAt = 5
+	ctx, cancel := context.WithCancel(requestContext(t))
+	defer cancel()
+	var acc protocol.Accumulator
+	var deltas strings.Builder
+	var n int
+	var errs []error
+	var cancelled time.Time
+	for e, err := range chatCompletions(t).GenerateStream(ctx, &protocol.Request{
+		Model:     chatModel,
+		Input:     []protocol.Item{userText("Write a long essay, of at least two thousand words, on the history of Paris.")},
+		Reasoning: protocol.ReasoningParam{Effort: protocol.ReasoningEffortLow},
+	}) {
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if len(errs) > 0 || ctx.Err() != nil {
+			t.Errorf("event %#v follows the cancel or the error", e)
+		}
+		if err := acc.Add(e); err != nil {
+			t.Fatalf("Accumulator.Add: %v", err)
+		}
+		if d, ok := e.(protocol.OutputTextDelta); ok {
+			deltas.WriteString(d.Delta)
+			if n++; n == cancelAt {
+				cancel()
+				cancelled = time.Now()
+			}
+		}
+	}
+	if cancelled.IsZero() {
+		t.Fatalf("the stream ended after %d output_text deltas, before the cancel at %d; errors %v", n, cancelAt, errs)
+	}
+	ended := time.Since(cancelled)
+	if len(errs) != 1 || !errors.Is(errs[0], context.Canceled) {
+		t.Fatalf("GenerateStream errors = %v, want one context.Canceled", errs)
+	}
+	resp := acc.Response()
+	if resp.Status != protocol.StatusInProgress || len(resp.Output) == 0 {
+		t.Fatalf("Response = %#v, want it in progress, with output", resp)
+	}
+	m, ok := resp.Output[len(resp.Output)-1].(protocol.Message)
+	switch {
+	case !ok:
+		t.Fatalf("last output = %#v, want the message", resp.Output[len(resp.Output)-1])
+	case m.Status != protocol.StatusInProgress || len(m.Content) != 1 || m.Content[0] != (protocol.OutputText{Text: deltas.String()}):
+		t.Errorf("message = %#v, want it in progress, holding the deltas joined, %q", m, deltas.String())
+	}
+	t.Logf("cancelled after %d output_text deltas, %q; the sequence ended %v later with %v; %d output items",
+		n, deltas.String(), ended, errs[0], len(resp.Output))
 }
