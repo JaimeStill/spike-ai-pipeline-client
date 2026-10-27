@@ -92,9 +92,9 @@ func fullJitter(d time.Duration) time.Duration {
 // do's, sending the same body; with the Client's retry policy, an attempt that fails in do as
 // RetryPolicy describes is made again after the wait it describes. An attempt that fails in
 // request, before anything is sent, such as on the token source's error, is returned at once,
-// whatever its error wraps. Every operation whose body is held whole
-// sends through here, so this is the one retry loop: Generate, Embed, and GenerateStream, whose
-// stream starts only once send returns.
+// whatever its error wraps. Every operation whose body is held whole sends through here, so this
+// is the one retry loop: Generate, Embed, and GenerateStream, whose stream starts only once send
+// returns.
 func (c *Client) send(ctx context.Context, route string, header http.Header, body []byte, contentType, accept string,
 	decodeError func(body []byte) (message, typ, code string)) (*http.Response, error) {
 	attempts := max(c.retry.MaxAttempts, 1)

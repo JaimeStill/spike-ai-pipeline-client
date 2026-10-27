@@ -31,10 +31,10 @@ import (
 //	content_filter    incomplete, reason content_filter
 //
 // The last output item takes the response's status, and the items before it are completed, as
-// the spec has only the last item incomplete; a reasoning item takes its status like any other, so a reply of reasoning alone stopped
-// at length is an incomplete reasoning item. Any other finish_reason, or a body with no choices,
-// is an error. The reply's usage gives the response's: prompt_tokens, completion_tokens,
-// total_tokens, and completion_tokens_details.reasoning_tokens.
+// the spec has only the last item incomplete; a reasoning item takes its status like any other,
+// so a reply of reasoning alone stopped at length is an incomplete reasoning item. Any other
+// finish_reason, or a body with no choices, is an error. The reply's usage gives the response's:
+// prompt_tokens, completion_tokens, total_tokens, and completion_tokens_details.reasoning_tokens.
 func (*Format) DecodeResponse(body []byte) (*protocol.Response, error) {
 	var wire response
 	if err := json.Unmarshal(body, &wire); err != nil {
