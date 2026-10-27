@@ -271,12 +271,12 @@ func TestStreamRecorded(t *testing.T) {
 	}{
 		{"text", `
 			0 response.created in_progress
-			1 response.output_item.added 0 protocol.Reasoning{ID:"chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/0", Content:[]protocol.ReasoningText(nil), Summary:[]protocol.SummaryText(nil), EncryptedContent:""}
+			1 response.output_item.added 0 protocol.Reasoning{ID:"chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/0", Status:"in_progress", Content:[]protocol.ReasoningText(nil), Summary:[]protocol.SummaryText(nil), EncryptedContent:""}
 			2 response.content_part.added 0 0 chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/0 protocol.ReasoningText{Text:""}
 			3-12 response.reasoning.delta 0 0 chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/0, 10 deltas
 			13 response.reasoning.done 0 0 chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/0 "We just output three French cities separated by commas."
 			14 response.content_part.done 0 0 chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/0 protocol.ReasoningText{Text:"We just output three French cities separated by commas."}
-			15 response.output_item.done 0 protocol.Reasoning{ID:"chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/0", Content:[]protocol.ReasoningText{protocol.ReasoningText{Text:"We just output three French cities separated by commas."}}, Summary:[]protocol.SummaryText(nil), EncryptedContent:"spike-ai-pipeline:completions/v1:eyJyZWFzb25pbmdfY29udGVudCI6IldlIGp1c3Qgb3V0cHV0IHRocmVlIEZyZW5jaCBjaXRpZXMgc2VwYXJhdGVkIGJ5IGNvbW1hcy4ifQ=="}
+			15 response.output_item.done 0 protocol.Reasoning{ID:"chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/0", Status:"completed", Content:[]protocol.ReasoningText{protocol.ReasoningText{Text:"We just output three French cities separated by commas."}}, Summary:[]protocol.SummaryText(nil), EncryptedContent:"spike-ai-pipeline:completions/v1:eyJyZWFzb25pbmdfY29udGVudCI6IldlIGp1c3Qgb3V0cHV0IHRocmVlIEZyZW5jaCBjaXRpZXMgc2VwYXJhdGVkIGJ5IGNvbW1hcy4ifQ=="}
 			16 response.output_item.added 1 protocol.Message{ID:"chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/1", Status:"in_progress", Role:"assistant", Content:[]protocol.ContentPart(nil)}
 			17 response.content_part.added 1 0 chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/1 protocol.OutputText{Text:""}
 			18 response.output_text.delta 1 0 chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/1 "Paris"
@@ -306,12 +306,12 @@ func TestStreamRecorded(t *testing.T) {
 			14 response.incomplete 1 items`},
 		{"tool_call", `
 			0 response.created in_progress
-			1 response.output_item.added 0 protocol.Reasoning{ID:"chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/0", Content:[]protocol.ReasoningText(nil), Summary:[]protocol.SummaryText(nil), EncryptedContent:""}
+			1 response.output_item.added 0 protocol.Reasoning{ID:"chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/0", Status:"in_progress", Content:[]protocol.ReasoningText(nil), Summary:[]protocol.SummaryText(nil), EncryptedContent:""}
 			2 response.content_part.added 0 0 chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/0 protocol.ReasoningText{Text:""}
 			3-10 response.reasoning.delta 0 0 chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/0, 8 deltas
 			11 response.reasoning.done 0 0 chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/0 "We need to call function get_weather."
 			12 response.content_part.done 0 0 chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/0 protocol.ReasoningText{Text:"We need to call function get_weather."}
-			13 response.output_item.done 0 protocol.Reasoning{ID:"chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/0", Content:[]protocol.ReasoningText{protocol.ReasoningText{Text:"We need to call function get_weather."}}, Summary:[]protocol.SummaryText(nil), EncryptedContent:"spike-ai-pipeline:completions/v1:eyJyZWFzb25pbmdfY29udGVudCI6IldlIG5lZWQgdG8gY2FsbCBmdW5jdGlvbiBnZXRfd2VhdGhlci4ifQ=="}
+			13 response.output_item.done 0 protocol.Reasoning{ID:"chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/0", Status:"completed", Content:[]protocol.ReasoningText{protocol.ReasoningText{Text:"We need to call function get_weather."}}, Summary:[]protocol.SummaryText(nil), EncryptedContent:"spike-ai-pipeline:completions/v1:eyJyZWFzb25pbmdfY29udGVudCI6IldlIG5lZWQgdG8gY2FsbCBmdW5jdGlvbiBnZXRfd2VhdGhlci4ifQ=="}
 			14 response.output_item.added 1 protocol.FunctionCall{ID:"chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/1", Status:"in_progress", CallID:"LsrzvhpPKdbtJyriZMr6ivjrWBgmWA3j", Name:"get_weather", Arguments:""}
 			15 response.function_call_arguments.delta 1 chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/1 "{"
 			16 response.function_call_arguments.delta 1 chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/1 "\n  \""
@@ -326,12 +326,12 @@ func TestStreamRecorded(t *testing.T) {
 			25 response.completed 2 items`},
 		{"parallel_tool_calls", `
 			0 response.created in_progress
-			1 response.output_item.added 0 protocol.Reasoning{ID:"chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/0", Content:[]protocol.ReasoningText(nil), Summary:[]protocol.SummaryText(nil), EncryptedContent:""}
+			1 response.output_item.added 0 protocol.Reasoning{ID:"chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/0", Status:"in_progress", Content:[]protocol.ReasoningText(nil), Summary:[]protocol.SummaryText(nil), EncryptedContent:""}
 			2 response.content_part.added 0 0 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/0 protocol.ReasoningText{Text:""}
 			3-97 response.reasoning.delta 0 0 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/0, 95 deltas
 			98 response.reasoning.done 0 0 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/0 "The user is asking for the current weather in two different cities: Paris and Tokyo.\nI have a tool \x60get_weather\x60 that takes a \x60city\x60 as an argument.\nThe user explicitly requested to call the tool once for each city, in parallel.\n\nPlan:\n1. Call \x60get_weather(city=\"Paris\")\x60.\n2. Call \x60get_weather(city=\"Tokyo\")\x60.\n3. Present the results to the user."
 			99 response.content_part.done 0 0 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/0 protocol.ReasoningText{Text:"The user is asking for the current weather in two different cities: Paris and Tokyo.\nI have a tool \x60get_weather\x60 that takes a \x60city\x60 as an argument.\nThe user explicitly requested to call the tool once for each city, in parallel.\n\nPlan:\n1. Call \x60get_weather(city=\"Paris\")\x60.\n2. Call \x60get_weather(city=\"Tokyo\")\x60.\n3. Present the results to the user."}
-			100 response.output_item.done 0 protocol.Reasoning{ID:"chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/0", Content:[]protocol.ReasoningText{protocol.ReasoningText{Text:"The user is asking for the current weather in two different cities: Paris and Tokyo.\nI have a tool \x60get_weather\x60 that takes a \x60city\x60 as an argument.\nThe user explicitly requested to call the tool once for each city, in parallel.\n\nPlan:\n1. Call \x60get_weather(city=\"Paris\")\x60.\n2. Call \x60get_weather(city=\"Tokyo\")\x60.\n3. Present the results to the user."}}, Summary:[]protocol.SummaryText(nil), EncryptedContent:"spike-ai-pipeline:completions/v1:eyJyZWFzb25pbmdfY29udGVudCI6IlRoZSB1c2VyIGlzIGFza2luZyBmb3IgdGhlIGN1cnJlbnQgd2VhdGhlciBpbiB0d28gZGlmZmVyZW50IGNpdGllczogUGFyaXMgYW5kIFRva3lvLlxuSSBoYXZlIGEgdG9vbCBgZ2V0X3dlYXRoZXJgIHRoYXQgdGFrZXMgYSBgY2l0eWAgYXMgYW4gYXJndW1lbnQuXG5UaGUgdXNlciBleHBsaWNpdGx5IHJlcXVlc3RlZCB0byBjYWxsIHRoZSB0b29sIG9uY2UgZm9yIGVhY2ggY2l0eSwgaW4gcGFyYWxsZWwuXG5cblBsYW46XG4xLiBDYWxsIGBnZXRfd2VhdGhlcihjaXR5PVwiUGFyaXNcIilgLlxuMi4gQ2FsbCBgZ2V0X3dlYXRoZXIoY2l0eT1cIlRva3lvXCIpYC5cbjMuIFByZXNlbnQgdGhlIHJlc3VsdHMgdG8gdGhlIHVzZXIuIn0="}
+			100 response.output_item.done 0 protocol.Reasoning{ID:"chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/0", Status:"completed", Content:[]protocol.ReasoningText{protocol.ReasoningText{Text:"The user is asking for the current weather in two different cities: Paris and Tokyo.\nI have a tool \x60get_weather\x60 that takes a \x60city\x60 as an argument.\nThe user explicitly requested to call the tool once for each city, in parallel.\n\nPlan:\n1. Call \x60get_weather(city=\"Paris\")\x60.\n2. Call \x60get_weather(city=\"Tokyo\")\x60.\n3. Present the results to the user."}}, Summary:[]protocol.SummaryText(nil), EncryptedContent:"spike-ai-pipeline:completions/v1:eyJyZWFzb25pbmdfY29udGVudCI6IlRoZSB1c2VyIGlzIGFza2luZyBmb3IgdGhlIGN1cnJlbnQgd2VhdGhlciBpbiB0d28gZGlmZmVyZW50IGNpdGllczogUGFyaXMgYW5kIFRva3lvLlxuSSBoYXZlIGEgdG9vbCBgZ2V0X3dlYXRoZXJgIHRoYXQgdGFrZXMgYSBgY2l0eWAgYXMgYW4gYXJndW1lbnQuXG5UaGUgdXNlciBleHBsaWNpdGx5IHJlcXVlc3RlZCB0byBjYWxsIHRoZSB0b29sIG9uY2UgZm9yIGVhY2ggY2l0eSwgaW4gcGFyYWxsZWwuXG5cblBsYW46XG4xLiBDYWxsIGBnZXRfd2VhdGhlcihjaXR5PVwiUGFyaXNcIilgLlxuMi4gQ2FsbCBgZ2V0X3dlYXRoZXIoY2l0eT1cIlRva3lvXCIpYC5cbjMuIFByZXNlbnQgdGhlIHJlc3VsdHMgdG8gdGhlIHVzZXIuIn0="}
 			101 response.output_item.added 1 protocol.FunctionCall{ID:"chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/1", Status:"in_progress", CallID:"zzwGjyJxRF0NLM9cl3nvl9X1uykH0HJn", Name:"get_weather", Arguments:""}
 			102 response.function_call_arguments.delta 1 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/1 "{"
 			103 response.function_call_arguments.delta 1 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/1 "\"city"
@@ -579,9 +579,10 @@ func TestStreamToolCalls(t *testing.T) {
 }
 
 // TestStreamReasoning covers the reasoning item: it comes first, its one reasoning_text part
-// streamed as reasoning deltas; it closes, of no status, when the message or a call begins, or at
-// the finish_reason; its output_item.done carries the envelope DecodeResponse gives the same
-// reasoning; and it folds to what DecodeResponse gives for the same reply.
+// streamed as reasoning deltas, added in progress; it closes, completed, when the message or a
+// call begins, or at the finish_reason, of the status it gives; its output_item.done carries the
+// envelope DecodeResponse gives the same reasoning; and it folds to what DecodeResponse gives for
+// the same reply.
 func TestStreamReasoning(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -600,12 +601,12 @@ func TestStreamReasoning(t *testing.T) {
 			},
 			trace: `
 				0 response.created in_progress
-				1 response.output_item.added 0 protocol.Reasoning{ID:"chatcmpl-1/0", Content:[]protocol.ReasoningText(nil), Summary:[]protocol.SummaryText(nil), EncryptedContent:""}
+				1 response.output_item.added 0 protocol.Reasoning{ID:"chatcmpl-1/0", Status:"in_progress", Content:[]protocol.ReasoningText(nil), Summary:[]protocol.SummaryText(nil), EncryptedContent:""}
 				2 response.content_part.added 0 0 chatcmpl-1/0 protocol.ReasoningText{Text:""}
 				3-4 response.reasoning.delta 0 0 chatcmpl-1/0, 2 deltas
 				5 response.reasoning.done 0 0 chatcmpl-1/0 "The user asks."
 				6 response.content_part.done 0 0 chatcmpl-1/0 protocol.ReasoningText{Text:"The user asks."}
-				7 response.output_item.done 0 protocol.Reasoning{ID:"chatcmpl-1/0", Content:[]protocol.ReasoningText{protocol.ReasoningText{Text:"The user asks."}}, Summary:[]protocol.SummaryText(nil), EncryptedContent:"` + envelopeUserAsks + `"}
+				7 response.output_item.done 0 protocol.Reasoning{ID:"chatcmpl-1/0", Status:"completed", Content:[]protocol.ReasoningText{protocol.ReasoningText{Text:"The user asks."}}, Summary:[]protocol.SummaryText(nil), EncryptedContent:"` + envelopeUserAsks + `"}
 				8 response.output_item.added 1 protocol.Message{ID:"chatcmpl-1/1", Status:"in_progress", Role:"assistant", Content:[]protocol.ContentPart(nil)}
 				9 response.content_part.added 1 0 chatcmpl-1/1 protocol.OutputText{Text:""}
 				10 response.output_text.delta 1 0 chatcmpl-1/1 "Paris"
@@ -625,12 +626,12 @@ func TestStreamReasoning(t *testing.T) {
 			},
 			trace: `
 				0 response.created in_progress
-				1 response.output_item.added 0 protocol.Reasoning{ID:"chatcmpl-1/0", Content:[]protocol.ReasoningText(nil), Summary:[]protocol.SummaryText(nil), EncryptedContent:""}
+				1 response.output_item.added 0 protocol.Reasoning{ID:"chatcmpl-1/0", Status:"in_progress", Content:[]protocol.ReasoningText(nil), Summary:[]protocol.SummaryText(nil), EncryptedContent:""}
 				2 response.content_part.added 0 0 chatcmpl-1/0 protocol.ReasoningText{Text:""}
 				3 response.reasoning.delta 0 0 chatcmpl-1/0 "Need the weather tool."
 				4 response.reasoning.done 0 0 chatcmpl-1/0 "Need the weather tool."
 				5 response.content_part.done 0 0 chatcmpl-1/0 protocol.ReasoningText{Text:"Need the weather tool."}
-				6 response.output_item.done 0 protocol.Reasoning{ID:"chatcmpl-1/0", Content:[]protocol.ReasoningText{protocol.ReasoningText{Text:"Need the weather tool."}}, Summary:[]protocol.SummaryText(nil), EncryptedContent:"` + envelopeWeatherTool + `"}
+				6 response.output_item.done 0 protocol.Reasoning{ID:"chatcmpl-1/0", Status:"completed", Content:[]protocol.ReasoningText{protocol.ReasoningText{Text:"Need the weather tool."}}, Summary:[]protocol.SummaryText(nil), EncryptedContent:"` + envelopeWeatherTool + `"}
 				7 response.output_item.added 1 protocol.FunctionCall{ID:"chatcmpl-1/1", Status:"in_progress", CallID:"c1", Name:"get_weather", Arguments:""}
 				8 response.function_call_arguments.delta 1 chatcmpl-1/1 "{\"city\":\"Paris\"}"
 				9 response.function_call_arguments.done 1 chatcmpl-1/1 "{\"city\":\"Paris\"}"
@@ -641,7 +642,7 @@ func TestStreamReasoning(t *testing.T) {
 				"finish_reason":"tool_calls"}]}`,
 		},
 		{
-			name: "reasoning alone, cut off at the bound",
+			name: "reasoning alone, cut off at the bound, the item incomplete",
 			chunks: []string{
 				delta(`{"reasoning_content":"The user"}`, ""),
 				delta(`{"reasoning_content":" asks."}`, "length"),
@@ -649,12 +650,12 @@ func TestStreamReasoning(t *testing.T) {
 			},
 			trace: `
 				0 response.created in_progress
-				1 response.output_item.added 0 protocol.Reasoning{ID:"chatcmpl-1/0", Content:[]protocol.ReasoningText(nil), Summary:[]protocol.SummaryText(nil), EncryptedContent:""}
+				1 response.output_item.added 0 protocol.Reasoning{ID:"chatcmpl-1/0", Status:"in_progress", Content:[]protocol.ReasoningText(nil), Summary:[]protocol.SummaryText(nil), EncryptedContent:""}
 				2 response.content_part.added 0 0 chatcmpl-1/0 protocol.ReasoningText{Text:""}
 				3-4 response.reasoning.delta 0 0 chatcmpl-1/0, 2 deltas
 				5 response.reasoning.done 0 0 chatcmpl-1/0 "The user asks."
 				6 response.content_part.done 0 0 chatcmpl-1/0 protocol.ReasoningText{Text:"The user asks."}
-				7 response.output_item.done 0 protocol.Reasoning{ID:"chatcmpl-1/0", Content:[]protocol.ReasoningText{protocol.ReasoningText{Text:"The user asks."}}, Summary:[]protocol.SummaryText(nil), EncryptedContent:"` + envelopeUserAsks + `"}
+				7 response.output_item.done 0 protocol.Reasoning{ID:"chatcmpl-1/0", Status:"incomplete", Content:[]protocol.ReasoningText{protocol.ReasoningText{Text:"The user asks."}}, Summary:[]protocol.SummaryText(nil), EncryptedContent:"` + envelopeUserAsks + `"}
 				8 response.incomplete 1 items`,
 			reply: `{"id":"chatcmpl-1","choices":[{"message":{"content":"","reasoning_content":"The user asks."},"finish_reason":"length"}],
 				"usage":{"completion_tokens":5,"prompt_tokens":7,"total_tokens":12}}`,

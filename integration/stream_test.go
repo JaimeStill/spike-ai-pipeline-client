@@ -134,8 +134,8 @@ func TestStreamReasoningRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatalf("Output[0] = %#v, want reasoning", resp.Output[0])
 	}
-	if strings.TrimSpace(deltas) == "" || len(r.Content) != 1 || r.Content[0].Text != deltas || r.EncryptedContent == "" {
-		t.Fatalf("reasoning = %#v, want the reasoning deltas joined, %q, and encrypted content", r, deltas)
+	if strings.TrimSpace(deltas) == "" || len(r.Content) != 1 || r.Content[0].Text != deltas || r.EncryptedContent == "" || r.Status != protocol.StatusCompleted {
+		t.Fatalf("reasoning = %#v, want it completed, with the reasoning deltas joined, %q, and encrypted content", r, deltas)
 	}
 	call := weatherCall(t, resp)
 	t.Logf("reasoning %q; reasoning tokens %d of %d output tokens",

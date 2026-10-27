@@ -307,11 +307,11 @@ func TestAccumulatorRefusesArgumentsEvent(t *testing.T) {
 // reasoningStream is a whole stream of a reasoning item, a reasoning_text part of "Hm, Paris." in
 // two deltas, then a message of "Paris", ending with response.completed.
 func reasoningStream() []protocol.Event {
-	reasoning := protocol.Reasoning{ID: "r/0", Content: []protocol.ReasoningText{{Text: "Hm, Paris."}}, EncryptedContent: "sealed"}
+	reasoning := protocol.Reasoning{ID: "r/0", Status: protocol.StatusCompleted, Content: []protocol.ReasoningText{{Text: "Hm, Paris."}}, EncryptedContent: "sealed"}
 	msg := protocol.Message{ID: "r/1", Status: protocol.StatusCompleted, Role: protocol.RoleAssistant, Content: []protocol.ContentPart{protocol.OutputText{Text: "Paris"}}}
 	return []protocol.Event{
 		protocol.ResponseCreated{SequenceNumber: 0, Response: &protocol.Response{Status: protocol.StatusInProgress}},
-		protocol.OutputItemAdded{SequenceNumber: 1, Item: protocol.Reasoning{ID: "r/0"}},
+		protocol.OutputItemAdded{SequenceNumber: 1, Item: protocol.Reasoning{ID: "r/0", Status: protocol.StatusInProgress}},
 		protocol.ContentPartAdded{SequenceNumber: 2, ItemID: "r/0", Part: protocol.ReasoningText{}},
 		protocol.ReasoningDelta{SequenceNumber: 3, ItemID: "r/0", Delta: "Hm,"},
 		protocol.ReasoningDelta{SequenceNumber: 4, ItemID: "r/0", Delta: " Paris."},
@@ -331,15 +331,16 @@ func reasoningStream() []protocol.Event {
 	}
 }
 
-// TestAccumulatorReasoning wants a reasoning item folded: open, with the reasoning its deltas
-// have made, no status, and no encrypted content, which only its done event gives; done, the item
-// as done, its encrypted content included; and ahead of the message after it, in output order.
+// TestAccumulatorReasoning wants a reasoning item folded: open, in progress, with the reasoning
+// its deltas have made and no encrypted content, which only its done event gives; done, the item
+// as done, its status and encrypted content included; and ahead of the message after it, in
+// output order.
 func TestAccumulatorReasoning(t *testing.T) {
 	inProgress := func(output ...protocol.Item) *protocol.Response {
 		return &protocol.Response{Status: protocol.StatusInProgress, Output: output}
 	}
 	open := func(content ...protocol.ReasoningText) protocol.Reasoning {
-		return protocol.Reasoning{ID: "r/0", Content: content}
+		return protocol.Reasoning{ID: "r/0", Status: protocol.StatusInProgress, Content: content}
 	}
 	events := reasoningStream()
 	done := events[7].(protocol.OutputItemDone).Item

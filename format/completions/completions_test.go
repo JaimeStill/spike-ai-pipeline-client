@@ -94,10 +94,11 @@ const (
 	envelopeEmpty       = "spike-ai-pipeline:completions/v1:eyJyZWFzb25pbmdfY29udGVudCI6IiJ9"
 )
 
-// reasoning is a reasoning item of the envelope encrypted, with content its format ignores on
-// input.
+// reasoning is a reasoning item of the envelope encrypted, with a status, content, and a summary
+// its format ignores on input, as it came back in a response's output.
 func reasoning(encrypted string) protocol.Reasoning {
 	return protocol.Reasoning{
+		Status:           protocol.StatusCompleted,
 		Content:          []protocol.ReasoningText{{Text: "content is never sent"}},
 		Summary:          []protocol.SummaryText{{Text: "nor is a summary"}},
 		EncryptedContent: encrypted,
@@ -702,6 +703,7 @@ func TestDecode(t *testing.T) {
 				Output: []protocol.Item{
 					protocol.Reasoning{
 						ID:               "chatcmpl-1/0",
+						Status:           protocol.StatusCompleted,
 						Content:          []protocol.ReasoningText{{Text: "The user asks."}},
 						EncryptedContent: envelopeUserAsks,
 					},
@@ -725,6 +727,7 @@ func TestDecode(t *testing.T) {
 				Output: []protocol.Item{
 					protocol.Reasoning{
 						ID:               "chatcmpl-2/0",
+						Status:           protocol.StatusCompleted,
 						Content:          []protocol.ReasoningText{{Text: "Need the weather tool."}},
 						EncryptedContent: envelopeWeatherTool,
 					},
@@ -740,11 +743,12 @@ func TestDecode(t *testing.T) {
 			},
 		},
 		{
-			name: "reasoning alone, cut off at the bound",
+			name: "reasoning alone, cut off at the bound, an incomplete reasoning item",
 			reply: `{"choices":[{"finish_reason":"length","message":{"role":"assistant",
 				"content":"","reasoning_content":"The user asks."}}]}`,
 			want: &protocol.Response{
 				Output: []protocol.Item{protocol.Reasoning{
+					Status:           protocol.StatusIncomplete,
 					Content:          []protocol.ReasoningText{{Text: "The user asks."}},
 					EncryptedContent: envelopeUserAsks,
 				}},
@@ -799,6 +803,7 @@ func TestDecode(t *testing.T) {
 			want: &protocol.Response{
 				Output: []protocol.Item{
 					protocol.Reasoning{
+						Status:           protocol.StatusCompleted,
 						Content:          []protocol.ReasoningText{{Text: "Need the weather tool."}},
 						EncryptedContent: envelopeWeatherTool,
 					},

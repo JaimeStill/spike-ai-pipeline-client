@@ -30,10 +30,10 @@ import (
 //
 // The last output item takes the response's status, and the items before it are completed, as
 // the spec has only the last item incomplete: the model finished each item before it began the
-// next. A reasoning item has no status, so it takes none. Any other finish_reason, or a body with
-// no choices, is an error. The reply's usage gives the
-// response's: prompt_tokens, completion_tokens, total_tokens, and
-// completion_tokens_details.reasoning_tokens.
+// next; a reasoning item takes its status like any other, so a reply of reasoning alone stopped
+// at length is an incomplete reasoning item. Any other finish_reason, or a body with no choices,
+// is an error. The reply's usage gives the response's: prompt_tokens, completion_tokens,
+// total_tokens, and completion_tokens_details.reasoning_tokens.
 func (*Format) DecodeResponse(body []byte) (*protocol.Response, error) {
 	var wire response
 	if err := json.Unmarshal(body, &wire); err != nil {
@@ -57,6 +57,7 @@ func (*Format) DecodeResponse(body []byte) (*protocol.Response, error) {
 		}
 		resp.Output = append(resp.Output, protocol.Reasoning{
 			ID:               id(),
+			Status:           protocol.StatusCompleted,
 			Content:          []protocol.ReasoningText{{Text: r}},
 			EncryptedContent: sealed,
 		})
@@ -94,10 +95,12 @@ func (*Format) DecodeResponse(body []byte) (*protocol.Response, error) {
 	return resp, nil
 }
 
-// withStatus returns it with status, or it unchanged when it is an item with no status, a
-// reasoning item.
+// withStatus returns it, an output item, with status.
 func withStatus(it protocol.Item, status protocol.Status) protocol.Item {
 	switch it := it.(type) {
+	case protocol.Reasoning:
+		it.Status = status
+		return it
 	case protocol.Message:
 		it.Status = status
 		return it
@@ -172,13 +175,14 @@ func (*Format) DecodeError(body []byte) (message, typ, code string) {
 //
 // The first event opens the stream with response.created, its response in_progress. The
 // choice's reasoning_content deltas make the reasoning item, first in the output, as
-// DecodeResponse orders it: output_item.added, with no content, when the first of them arrives,
-// then its one reasoning_text part, with content_part.added, a reasoning.delta for each, and at
-// its close reasoning.done and content_part.done, and output_item.done carrying the whole item.
+// DecodeResponse orders it: output_item.added, in progress and with no content, when the first
+// of them arrives, then its one reasoning_text part, with content_part.added, a reasoning.delta
+// for each, and at its close reasoning.done and content_part.done, and output_item.done carrying
+// the whole item.
 // The item closes when the message's content, or the first tool call, begins, or at the
 // finish_reason, and its output_item.done carries the encrypted_content envelope DecodeResponse
 // gives the same reasoning, which EncodeRequest reads back, so the folded Response can be sent
-// back as it came. Reasoning has no status, so the item takes none.
+// back as it came.
 //
 // The choice's content and refusal deltas then make the assistant message: output_item.added, in
 // progress, when the first of them arrives; then for each run of content, or of refusal, a
@@ -200,8 +204,8 @@ func (*Format) DecodeError(body []byte) (message, typ, code string) {
 //
 // An item closed because a later one began is completed. The item open when the finish_reason
 // arrives closes then, taking the status it gives, as DecodeResponse maps it, so only the last
-// item can be incomplete; a reasoning item, which has no status, takes none. It translates the
-// reasoning, the message, and its calls alone: a chunk's other members are ignored.
+// item can be incomplete, a reasoning item as any other. It translates the reasoning, the
+// message, and its calls alone: a chunk's other members are ignored.
 //
 // The stream ends at data [DONE], or at the end of the stream once the finish_reason has
 // arrived, where it closes with the terminal event: response.completed or
@@ -357,7 +361,7 @@ func (d *streamDecoder) decode(data []byte) error {
 				return fmt.Errorf("chunk has unknown finish_reason %q", choice.FinishReason)
 			}
 			d.finished = true
-			if err := d.closeReasoning(); err != nil {
+			if err := d.closeReasoning(d.status); err != nil {
 				return err
 			}
 			d.closeMessage(d.status)
@@ -415,7 +419,7 @@ func (d *streamDecoder) reason(text string) error {
 		}
 		r = &streamReasoning{id: itemID(d.id, len(d.output)), index: len(d.output)}
 		d.reasoning = r
-		d.emit(protocol.OutputItemAdded{SequenceNumber: d.next(), OutputIndex: r.index, Item: protocol.Reasoning{ID: r.id}})
+		d.emit(protocol.OutputItemAdded{SequenceNumber: d.next(), OutputIndex: r.index, Item: protocol.Reasoning{ID: r.id, Status: protocol.StatusInProgress}})
 		d.emit(protocol.ContentPartAdded{SequenceNumber: d.next(), ItemID: r.id, OutputIndex: r.index, Part: protocol.ReasoningText{}})
 	}
 	r.text.WriteString(text)
@@ -424,9 +428,9 @@ func (d *streamDecoder) reason(text string) error {
 }
 
 // closeReasoning closes the open reasoning item, if there is one: reasoning.done,
-// content_part.done, then output_item.done carrying the whole item, its encrypted_content the
-// envelope DecodeResponse gives the same reasoning.
-func (d *streamDecoder) closeReasoning() error {
+// content_part.done, then output_item.done carrying the whole item, of status, its
+// encrypted_content the envelope DecodeResponse gives the same reasoning.
+func (d *streamDecoder) closeReasoning(status protocol.Status) error {
 	r := d.reasoning
 	if r == nil {
 		return nil
@@ -439,7 +443,7 @@ func (d *streamDecoder) closeReasoning() error {
 	part := protocol.ReasoningText{Text: text}
 	d.emit(protocol.ReasoningDone{SequenceNumber: d.next(), ItemID: r.id, OutputIndex: r.index, Text: text})
 	d.emit(protocol.ContentPartDone{SequenceNumber: d.next(), ItemID: r.id, OutputIndex: r.index, Part: part})
-	item := protocol.Reasoning{ID: r.id, Content: []protocol.ReasoningText{part}, EncryptedContent: sealed}
+	item := protocol.Reasoning{ID: r.id, Status: status, Content: []protocol.ReasoningText{part}, EncryptedContent: sealed}
 	d.emit(protocol.OutputItemDone{SequenceNumber: d.next(), OutputIndex: r.index, Item: item})
 	d.output = append(d.output, item)
 	d.reasoning = nil
@@ -456,7 +460,7 @@ func (d *streamDecoder) delta(kind partKind, text string) error {
 	if d.called {
 		return errors.New("message text after a tool call")
 	}
-	if err := d.closeReasoning(); err != nil {
+	if err := d.closeReasoning(protocol.StatusCompleted); err != nil {
 		return err
 	}
 	m := d.message
@@ -506,7 +510,7 @@ func (d *streamDecoder) toolCall(f toolCallDelta) error {
 		if f.Function.Name == "" {
 			return fmt.Errorf("tool call %d's first fragment has no function name", f.Index)
 		}
-		if err := d.closeReasoning(); err != nil {
+		if err := d.closeReasoning(protocol.StatusCompleted); err != nil {
 			return err
 		}
 		d.closeMessage(protocol.StatusCompleted)

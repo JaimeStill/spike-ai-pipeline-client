@@ -65,7 +65,7 @@ type ResponseFailed struct {
 func (ResponseFailed) event() {}
 
 // OutputItemAdded is response.output_item.added: an output item was added, before any event
-// about its content, its status StatusInProgress when it has one; a Reasoning item has none.
+// about its content, its status StatusInProgress when it has one.
 type OutputItemAdded struct {
 	// SequenceNumber is the event's place in the stream.
 	SequenceNumber int

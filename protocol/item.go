@@ -192,13 +192,18 @@ func (FunctionCallOutput) item() {}
 // caller carries it back unchanged. A format reading another format's EncryptedContent drops
 // the item rather than send it.
 //
-// The spec gives the reasoning item no status, so Reasoning has none.
+// Reasoning has a Status, as every other output item does. The spec's reference schema for the
+// reasoning item omits status, but its normative rule for items requires id, type, and status on
+// every item, and its own reasoning example carries one; the client follows the rule.
 type Reasoning struct {
 	// ID is the item's id in a response's output, which the spec requires there and the
 	// streaming events carry as their item id. A format whose API supplies none derives it, as
 	// completions does from the reply's id and the item's output index; it is empty when the
 	// format has nothing to derive it from.
 	ID string
+	// Status is the item's status in a response's output, when the format supplies one. It is
+	// ignored on input.
+	Status Status
 	// Content is the reasoning the model produced, as reasoning_text parts, when the format
 	// supplies it. It is output only: on input it is ignored and never sent.
 	Content []ReasoningText
