@@ -7,8 +7,9 @@ and the README do not express; the spike's question and evidence live in the roo
 
 ## Capability map
 
-- **model**: the request and response model shared by every format.
-- **formats**: one package per wire format behind the Format interface: Chat Completions, then
-  Anthropic Messages.
-- **streaming**: the SSE decoder and the typed deltas with their accumulator.
-- **retry**: the opt-in retry policy.
+- **protocol**: the request and response model (`protocol`).
+- **formats**: the `format` contract and a package per wire format below it: Chat Completions
+  (`format/completions`); Anthropic Messages and Open Responses are planned.
+- **transport**: the module root, package `client`: `Generate`, `Embed`, and `Transcribe`.
+- **streaming**: planned: `GenerateStream`, over an in-house SSE decoder.
+- **retry**: planned: an opt-in retry policy.
