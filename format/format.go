@@ -43,14 +43,17 @@ type Format interface {
 // StreamDecoder turns the events of one streamed reply into the protocol's streaming events: a
 // stream opens with protocol.ResponseCreated and closes with one terminal event, whose Response
 // holds the finished output and the usage. It is framing-neutral: the client reads the reply's
-// framing, such as server-sent events, and hands the decoder each event's type and data. It
-// serves one stream, and isn't safe for concurrent use.
+// framing, such as server-sent events, and hands the decoder each event's data alone. A format
+// that names its events carries the name in the data as well, as Open Responses requires its
+// event field to match the type in the event's body and Anthropic Messages puts a type in every
+// data body, and Chat Completions names none; so the decoder reads an event's type, where its
+// format has one, from the data. It serves one stream, and isn't safe for concurrent use.
 type StreamDecoder interface {
-	// Decode decodes the stream's next event, of type typ, empty when the framing names none,
-	// and data, and returns the protocol events it makes, which may be none. A chunk the format
-	// can't decode is an error, after which the stream is broken; with it, Decode returns the
-	// events it made before the error, which the client yields ahead of it.
-	Decode(typ string, data []byte) ([]protocol.Event, error)
+	// Decode decodes data, the stream's next event's, and returns the protocol events it
+	// makes, which may be none. A chunk the format can't decode is an error, after which the
+	// stream is broken; with it, Decode returns the events it made before the error, which the
+	// client yields ahead of it.
+	Decode(data []byte) ([]protocol.Event, error)
 	// End is told the stream has ended, and returns the events that close it. A stream that
 	// ended before it was complete is an error matching io.ErrUnexpectedEOF.
 	End() ([]protocol.Event, error)

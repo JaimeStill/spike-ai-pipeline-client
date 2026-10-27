@@ -96,6 +96,25 @@ func TestGenerateStream(t *testing.T) {
 	}
 }
 
+// TestGenerateStreamIgnoresEventNames wants a stream whose events are named folded as the same
+// stream unnamed: the client hands the format each event's data alone.
+func TestGenerateStreamIgnoresEventNames(t *testing.T) {
+	var b strings.Builder
+	for _, c := range streamed {
+		fmt.Fprintf(&b, "event: chunk\ndata: %s\n\n", c)
+	}
+	named := clienttest.NewServer(t, http.StatusOK, b.String())
+	unnamed := clienttest.NewServer(t, http.StatusOK, eventStream(streamed...))
+	_, got, errs := collect(t, newClient(t, client.Config{BaseURL: named.URL}).GenerateStream(t.Context(), hello()))
+	if len(errs) > 0 {
+		t.Fatalf("GenerateStream errors: %v", errs)
+	}
+	_, want, _ := collect(t, newClient(t, client.Config{BaseURL: unnamed.URL}).GenerateStream(t.Context(), hello()))
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Response = %#v\nwant       %#v", got, want)
+	}
+}
+
 // TestGenerateStreamIsLazy wants nothing validated, encoded, or sent until the sequence is
 // ranged, and a new request each time it is.
 func TestGenerateStreamIsLazy(t *testing.T) {

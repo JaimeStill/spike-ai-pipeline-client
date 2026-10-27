@@ -78,7 +78,9 @@ func (c *Client) stream(ctx context.Context, req *protocol.Request, yield func(p
 		if err != nil {
 			return fmt.Errorf("read stream: %w", err)
 		}
-		made, err := decoder.Decode(e.Type, []byte(e.Data))
+		// The decoder takes the data alone: a format that names its events carries the name in
+		// the data too, so the event field is the framing's and isn't passed.
+		made, err := decoder.Decode([]byte(e.Data))
 		switch {
 		case emit(made):
 			return nil

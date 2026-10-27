@@ -125,8 +125,8 @@ func (*Format) DecodeError(body []byte) (message, typ, code string) {
 
 // NewStreamDecoder returns a decoder for one streamed Chat Completions reply: a stream of
 // chat.completion.chunk events, which it turns into the protocol's streaming events in the
-// spec's order. Chat Completions names no event types, so it reads every event's data alike,
-// whatever its type. Of each chunk it reads the first choice, index 0, and the usage.
+// spec's order. Chat Completions names no event types: every event's data is a chunk, or the
+// [DONE] that ends the stream. Of each chunk it reads the first choice, index 0, and the usage.
 //
 // The first event opens the stream with response.created, its response in_progress. The
 // choice's content and refusal deltas make the assistant message: output_item.added, in
@@ -191,7 +191,7 @@ const (
 
 // Decode decodes one event of the stream, as NewStreamDecoder describes. With an error, the
 // events it returns are those it made before it.
-func (d *streamDecoder) Decode(_ string, data []byte) ([]protocol.Event, error) {
+func (d *streamDecoder) Decode(data []byte) ([]protocol.Event, error) {
 	d.events = nil
 	if err := d.decode(data); err != nil {
 		d.ended = true

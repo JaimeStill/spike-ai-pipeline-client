@@ -43,7 +43,7 @@ func decodeStream(t *testing.T, body string) streamResult {
 		if err != nil {
 			t.Fatalf("sse: %v", err)
 		}
-		made, err := decoder.Decode(e.Type, []byte(e.Data))
+		made, err := decoder.Decode([]byte(e.Data))
 		r.events = append(r.events, made...)
 		if err != nil {
 			r.err = err
@@ -356,7 +356,7 @@ func TestStreamEnd(t *testing.T) {
 func TestStreamEndMakesNothingAfterTheTerminalEvent(t *testing.T) {
 	decoder := completions.New().NewStreamDecoder()
 	for _, data := range []string{delta(`{"content":"Paris"}`, "stop"), "[DONE]"} {
-		if _, err := decoder.Decode("", []byte(data)); err != nil {
+		if _, err := decoder.Decode([]byte(data)); err != nil {
 			t.Fatalf("Decode(%s): %v", data, err)
 		}
 	}
@@ -383,14 +383,14 @@ func TestStreamRefusesChunk(t *testing.T) {
 			decoder := completions.New().NewStreamDecoder()
 			var err error
 			for _, c := range tc.chunks {
-				if _, err = decoder.Decode("", []byte(c)); err != nil {
+				if _, err = decoder.Decode([]byte(c)); err != nil {
 					break
 				}
 			}
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("Decode error = %v, want one containing %q", err, tc.want)
 			}
-			if _, err := decoder.Decode("", []byte(text)); err == nil {
+			if _, err := decoder.Decode([]byte(text)); err == nil {
 				t.Error("Decode after an error = nil, want the stream broken")
 			}
 		})
@@ -400,7 +400,7 @@ func TestStreamRefusesChunk(t *testing.T) {
 // TestStreamReturnsEventsBeforeAnError wants the events a chunk made before its error: the
 // first chunk opens the stream before it is found not to be JSON.
 func TestStreamReturnsEventsBeforeAnError(t *testing.T) {
-	events, err := completions.New().NewStreamDecoder().Decode("", []byte("not JSON"))
+	events, err := completions.New().NewStreamDecoder().Decode([]byte("not JSON"))
 	if err == nil {
 		t.Fatal("Decode = nil error, want one")
 	}
