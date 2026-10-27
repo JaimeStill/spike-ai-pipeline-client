@@ -75,10 +75,9 @@ import (
 // verbosity; and a JSON-schema format's name, description, and strict flag.
 //
 // The request is unstreamed, sent with stream false; EncodeStreamRequest streams it. Native's
-// members, the native tier, are
-// merged into the top level, and a member named like one the typed fields set is refused, as is
-// stream, which is always set. The header is set only once the body is encoded, so a refused
-// request adds none.
+// members, the native tier, are merged into the top level, and a member named like one the typed
+// fields set is refused, as is stream, which is always set. The header is set only once the body
+// is encoded, so a refused request adds none.
 func (*Format) EncodeRequest(req *protocol.Request, header http.Header) ([]byte, error) {
 	return encode(req, false, header)
 }

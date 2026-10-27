@@ -68,13 +68,14 @@ func chatCompletions(t *testing.T) *client.Client {
 }
 
 // testFormat is a format a scenario runs through: its name, its constructor, and whether the
-// router drops the hints a scenario records rather than asserts for it.
+// router drops the hints hinted checks for it.
 type testFormat struct {
 	name string
 	new  func() format.Format
-	// dropsHints is set when the router drops the format's structured output, named and none
-	// tool choices, and reasoning effort before they reach the model, as it drops Messages'
-	// output_config and treats its named and none tool choices as any and none at all.
+	// dropsHints is set when the router drops the format's structured output before it reaches
+	// the model, as it drops Messages' output_config, so hinted records the check rather than
+	// asserting it. Reasoning effort and the named and none tool choices are recorded on every
+	// format, by record.
 	dropsHints bool
 }
 

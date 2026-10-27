@@ -104,9 +104,9 @@ func TestStreamFunctionCall(t *testing.T) {
 	})
 }
 
-// accumulate ranges a stream of req from c, folds its events, and returns the Response they make and
-// the reasoning its reasoning deltas made, joined, failing t on a stream error or an event the
-// Accumulator refuses.
+// accumulate ranges a stream of req from c, folds its events, and returns the Response they make
+// and the reasoning its reasoning deltas made, joined, failing t on a stream error or an event
+// the Accumulator refuses.
 func accumulate(t *testing.T, c *client.Client, req *protocol.Request) (*protocol.Response, string) {
 	t.Helper()
 	var acc protocol.Accumulator
@@ -170,9 +170,9 @@ func TestStreamReasoningRoundTrip(t *testing.T) {
 }
 
 // TestStreamCancel streams a long answer through each format and cancels the context once a few
-// output_text deltas have arrived. It wants no event after the cancel, the context's error as the sequence's one
-// error, and the accumulated Response in progress, its message holding the text the deltas made
-// so far. How long after the cancel the sequence ended is logged, not asserted.
+// output_text deltas have arrived. It wants no event after the cancel, the context's error as the
+// sequence's one error, and the accumulated Response in progress, its message holding the text
+// the deltas made so far. How long after the cancel the sequence ended is logged, not asserted.
 func TestStreamCancel(t *testing.T) {
 	eachFormat(t, func(t *testing.T, c *client.Client) {
 		const cancelAt = 5
