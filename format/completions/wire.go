@@ -193,9 +193,10 @@ type chunk struct {
 	Choices []struct {
 		Index int `json:"index"`
 		Delta struct {
-			Content   string          `json:"content"`
-			Refusal   string          `json:"refusal"`
-			ToolCalls []toolCallDelta `json:"tool_calls"`
+			ReasoningContent string          `json:"reasoning_content"`
+			Content          string          `json:"content"`
+			Refusal          string          `json:"refusal"`
+			ToolCalls        []toolCallDelta `json:"tool_calls"`
 		} `json:"delta"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`

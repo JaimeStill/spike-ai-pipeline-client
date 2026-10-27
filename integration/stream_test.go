@@ -94,3 +94,65 @@ func TestStreamFunctionCall(t *testing.T) {
 	}
 	t.Logf("%d events, function_call %s(%s), call_id %q, id %q", events, call.Name, call.Arguments, call.CallID, call.ID)
 }
+
+// accumulate ranges a stream of req, folds its events, and returns the Response they make and
+// the reasoning its reasoning deltas made, joined, failing t on a stream error or an event the
+// Accumulator refuses.
+func accumulate(t *testing.T, req *protocol.Request) (*protocol.Response, string) {
+	t.Helper()
+	var acc protocol.Accumulator
+	var reasoning strings.Builder
+	for e, err := range chatCompletions(t).GenerateStream(requestContext(t), req) {
+		if err != nil {
+			t.Fatalf("GenerateStream: %v", err)
+		}
+		if d, ok := e.(protocol.ReasoningDelta); ok {
+			reasoning.WriteString(d.Delta)
+		}
+		if err := acc.Add(e); err != nil {
+			t.Fatalf("Accumulator.Add: %v", err)
+		}
+	}
+	return acc.Response(), reasoning.String()
+}
+
+// TestStreamReasoningRoundTrip streams a reply that must call get_weather, with a reasoning
+// effort, and wants its accumulated output to hold reasoning ahead of the call: the reasoning
+// deltas joined, and the encrypted content the format sends back. It sends that output back as
+// it came, reasoning included, with the call's output, streams again, and wants the accumulated
+// Response completed with an answer that uses it.
+func TestStreamReasoningRoundTrip(t *testing.T) {
+	req := &protocol.Request{
+		Model:      chatModel,
+		Input:      []protocol.Item{weatherQuestion},
+		Tools:      []protocol.FunctionTool{getWeather},
+		ToolChoice: protocol.ToolChoiceRequired,
+		Reasoning:  protocol.ReasoningParam{Effort: protocol.ReasoningEffortMedium},
+	}
+	resp, deltas := accumulate(t, req)
+	r, ok := resp.Output[0].(protocol.Reasoning)
+	if !ok {
+		t.Fatalf("Output[0] = %#v, want reasoning", resp.Output[0])
+	}
+	if strings.TrimSpace(deltas) == "" || len(r.Content) != 1 || r.Content[0].Text != deltas || r.EncryptedContent == "" {
+		t.Fatalf("reasoning = %#v, want the reasoning deltas joined, %q, and encrypted content", r, deltas)
+	}
+	call := weatherCall(t, resp)
+	t.Logf("reasoning %q; reasoning tokens %d of %d output tokens",
+		deltas, resp.Usage.OutputTokensDetails.ReasoningTokens, resp.Usage.OutputTokens)
+	t.Logf("function_call %s(%s), call_id %q", call.Name, call.Arguments, call.CallID)
+
+	req.Input = append(req.Input, resp.Output...)
+	req.Input = append(req.Input, protocol.FunctionCallOutput{
+		CallID: call.CallID,
+		Output: `{"city":"Paris","celsius":17}`,
+	})
+	req.ToolChoice = protocol.ToolChoiceAuto
+	resp, _ = accumulate(t, req)
+	answer := completedText(t, resp)
+	t.Logf("answer %q; reasoning tokens %d of %d output tokens",
+		answer, resp.Usage.OutputTokensDetails.ReasoningTokens, resp.Usage.OutputTokens)
+	if !strings.Contains(answer, "17") {
+		t.Errorf("the answer %q doesn't use the tool's temperature, 17", answer)
+	}
+}

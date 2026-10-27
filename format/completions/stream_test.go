@@ -87,11 +87,31 @@ func readTestdata(t *testing.T, name string) string {
 
 // trace renders events one per line, each its spec type and the members it carries: a part
 // event's output index, content index, and item id, then its part or text, and an arguments
-// event's output index and item id, then its arguments text.
+// event's output index and item id, then its arguments text. A run of reasoning deltas, which a
+// recorded stream makes by the dozen, is one line of its first and last sequence numbers and its
+// count; the reasoning.done after it gives their text joined, which the Accumulator checks. Each
+// backtick is written \x60, so a trace fits in a raw string.
 func trace(events []protocol.Event) string {
 	var b strings.Builder
-	for _, e := range events {
-		switch e := e.(type) {
+	for i := 0; i < len(events); i++ {
+		switch e := events[i].(type) {
+		case protocol.ReasoningDelta:
+			n := 1
+			for i+n < len(events) {
+				if _, ok := events[i+n].(protocol.ReasoningDelta); !ok {
+					break
+				}
+				n++
+			}
+			if n == 1 {
+				fmt.Fprintf(&b, "%d response.reasoning.delta %d %d %s %q\n", e.SequenceNumber, e.OutputIndex, e.ContentIndex, e.ItemID, e.Delta)
+				continue
+			}
+			last := events[i+n-1].(protocol.ReasoningDelta)
+			fmt.Fprintf(&b, "%d-%d response.reasoning.delta %d %d %s, %d deltas\n", e.SequenceNumber, last.SequenceNumber, e.OutputIndex, e.ContentIndex, e.ItemID, n)
+			i += n - 1
+		case protocol.ReasoningDone:
+			fmt.Fprintf(&b, "%d response.reasoning.done %d %d %s %q\n", e.SequenceNumber, e.OutputIndex, e.ContentIndex, e.ItemID, e.Text)
 		case protocol.ResponseCreated:
 			fmt.Fprintf(&b, "%d response.created %s\n", e.SequenceNumber, e.Response.Status)
 		case protocol.ResponseCompleted:
@@ -122,7 +142,7 @@ func trace(events []protocol.Event) string {
 			fmt.Fprintf(&b, "%T\n", e)
 		}
 	}
-	return b.String()
+	return strings.ReplaceAll(b.String(), "`", `\x60`)
 }
 
 // assertTrace fails t unless events render as want, a trace with its lines' leading tabs
@@ -159,10 +179,9 @@ func assertResponse(t *testing.T, got, want *protocol.Response) {
 }
 
 // asStreamed returns reply, an unstreamed reply's body, as the reply body, a text/event-stream
-// reply, gave: its id the stream's first chunk's, each tool call's id the one the stream gave the
-// call in its place, and its reasoning_content left out, as the stream decoder translates the
-// message and its calls alone. The recorded replies were each sent twice, and the router makes
-// new ids for each, so the streamed reply's ids aren't the other's.
+// reply, gave: its id the stream's first chunk's, and each tool call's id the one the stream gave
+// the call in its place. The recorded replies were each sent twice, and the router makes new ids
+// for each, so the streamed reply's ids aren't the other's.
 func asStreamed(t *testing.T, reply, body string) string {
 	t.Helper()
 	var r map[string]any
@@ -173,7 +192,6 @@ func asStreamed(t *testing.T, reply, body string) string {
 	callIDs := streamCallIDs(t, body)
 	for _, c := range r["choices"].([]any) {
 		m := c.(map[string]any)["message"].(map[string]any)
-		delete(m, "reasoning_content")
 		calls, _ := m["tool_calls"].([]any)
 		if len(calls) != len(callIDs) {
 			t.Fatalf("the reply has %d tool calls, the stream %d", len(calls), len(callIDs))
@@ -253,17 +271,23 @@ func TestStreamRecorded(t *testing.T) {
 	}{
 		{"text", `
 			0 response.created in_progress
-			1 response.output_item.added 0 protocol.Message{ID:"chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/0", Status:"in_progress", Role:"assistant", Content:[]protocol.ContentPart(nil)}
-			2 response.content_part.added 0 0 chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/0 protocol.OutputText{Text:""}
-			3 response.output_text.delta 0 0 chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/0 "Paris"
-			4 response.output_text.delta 0 0 chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/0 ","
-			5 response.output_text.delta 0 0 chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/0 " Lyon"
-			6 response.output_text.delta 0 0 chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/0 ","
-			7 response.output_text.delta 0 0 chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/0 " Marseille"
-			8 response.output_text.done 0 0 chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/0 "Paris, Lyon, Marseille"
-			9 response.content_part.done 0 0 chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/0 protocol.OutputText{Text:"Paris, Lyon, Marseille"}
-			10 response.output_item.done 0 protocol.Message{ID:"chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/0", Status:"completed", Role:"assistant", Content:[]protocol.ContentPart{protocol.OutputText{Text:"Paris, Lyon, Marseille"}}}
-			11 response.completed 1 items`},
+			1 response.output_item.added 0 protocol.Reasoning{ID:"chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/0", Content:[]protocol.ReasoningText(nil), Summary:[]protocol.SummaryText(nil), EncryptedContent:""}
+			2 response.content_part.added 0 0 chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/0 protocol.ReasoningText{Text:""}
+			3-12 response.reasoning.delta 0 0 chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/0, 10 deltas
+			13 response.reasoning.done 0 0 chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/0 "We just output three French cities separated by commas."
+			14 response.content_part.done 0 0 chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/0 protocol.ReasoningText{Text:"We just output three French cities separated by commas."}
+			15 response.output_item.done 0 protocol.Reasoning{ID:"chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/0", Content:[]protocol.ReasoningText{protocol.ReasoningText{Text:"We just output three French cities separated by commas."}}, Summary:[]protocol.SummaryText(nil), EncryptedContent:"spike-ai-pipeline:completions/v1:eyJyZWFzb25pbmdfY29udGVudCI6IldlIGp1c3Qgb3V0cHV0IHRocmVlIEZyZW5jaCBjaXRpZXMgc2VwYXJhdGVkIGJ5IGNvbW1hcy4ifQ=="}
+			16 response.output_item.added 1 protocol.Message{ID:"chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/1", Status:"in_progress", Role:"assistant", Content:[]protocol.ContentPart(nil)}
+			17 response.content_part.added 1 0 chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/1 protocol.OutputText{Text:""}
+			18 response.output_text.delta 1 0 chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/1 "Paris"
+			19 response.output_text.delta 1 0 chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/1 ","
+			20 response.output_text.delta 1 0 chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/1 " Lyon"
+			21 response.output_text.delta 1 0 chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/1 ","
+			22 response.output_text.delta 1 0 chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/1 " Marseille"
+			23 response.output_text.done 1 0 chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/1 "Paris, Lyon, Marseille"
+			24 response.content_part.done 1 0 chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/1 protocol.OutputText{Text:"Paris, Lyon, Marseille"}
+			25 response.output_item.done 1 protocol.Message{ID:"chatcmpl-NL7ZS1BCe0E5im0oLhUHyZ2JRMCqBgq7/1", Status:"completed", Role:"assistant", Content:[]protocol.ContentPart{protocol.OutputText{Text:"Paris, Lyon, Marseille"}}}
+			26 response.completed 2 items`},
 		{"length", `
 			0 response.created in_progress
 			1 response.output_item.added 0 protocol.Message{ID:"chatcmpl-Ua3L4FAciVzBKIrsejypEGgyaReDN4Rk/0", Status:"in_progress", Role:"assistant", Content:[]protocol.ContentPart(nil)}
@@ -282,41 +306,53 @@ func TestStreamRecorded(t *testing.T) {
 			14 response.incomplete 1 items`},
 		{"tool_call", `
 			0 response.created in_progress
-			1 response.output_item.added 0 protocol.FunctionCall{ID:"chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/0", Status:"in_progress", CallID:"LsrzvhpPKdbtJyriZMr6ivjrWBgmWA3j", Name:"get_weather", Arguments:""}
-			2 response.function_call_arguments.delta 0 chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/0 "{"
-			3 response.function_call_arguments.delta 0 chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/0 "\n  \""
-			4 response.function_call_arguments.delta 0 chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/0 "city"
-			5 response.function_call_arguments.delta 0 chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/0 "\":"
-			6 response.function_call_arguments.delta 0 chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/0 " \""
-			7 response.function_call_arguments.delta 0 chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/0 "Paris"
-			8 response.function_call_arguments.delta 0 chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/0 "\""
-			9 response.function_call_arguments.delta 0 chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/0 "\n}"
-			10 response.function_call_arguments.done 0 chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/0 "{\n  \"city\": \"Paris\"\n}"
-			11 response.output_item.done 0 protocol.FunctionCall{ID:"chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/0", Status:"completed", CallID:"LsrzvhpPKdbtJyriZMr6ivjrWBgmWA3j", Name:"get_weather", Arguments:"{\n  \"city\": \"Paris\"\n}"}
-			12 response.completed 1 items`},
+			1 response.output_item.added 0 protocol.Reasoning{ID:"chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/0", Content:[]protocol.ReasoningText(nil), Summary:[]protocol.SummaryText(nil), EncryptedContent:""}
+			2 response.content_part.added 0 0 chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/0 protocol.ReasoningText{Text:""}
+			3-10 response.reasoning.delta 0 0 chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/0, 8 deltas
+			11 response.reasoning.done 0 0 chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/0 "We need to call function get_weather."
+			12 response.content_part.done 0 0 chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/0 protocol.ReasoningText{Text:"We need to call function get_weather."}
+			13 response.output_item.done 0 protocol.Reasoning{ID:"chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/0", Content:[]protocol.ReasoningText{protocol.ReasoningText{Text:"We need to call function get_weather."}}, Summary:[]protocol.SummaryText(nil), EncryptedContent:"spike-ai-pipeline:completions/v1:eyJyZWFzb25pbmdfY29udGVudCI6IldlIG5lZWQgdG8gY2FsbCBmdW5jdGlvbiBnZXRfd2VhdGhlci4ifQ=="}
+			14 response.output_item.added 1 protocol.FunctionCall{ID:"chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/1", Status:"in_progress", CallID:"LsrzvhpPKdbtJyriZMr6ivjrWBgmWA3j", Name:"get_weather", Arguments:""}
+			15 response.function_call_arguments.delta 1 chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/1 "{"
+			16 response.function_call_arguments.delta 1 chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/1 "\n  \""
+			17 response.function_call_arguments.delta 1 chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/1 "city"
+			18 response.function_call_arguments.delta 1 chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/1 "\":"
+			19 response.function_call_arguments.delta 1 chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/1 " \""
+			20 response.function_call_arguments.delta 1 chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/1 "Paris"
+			21 response.function_call_arguments.delta 1 chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/1 "\""
+			22 response.function_call_arguments.delta 1 chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/1 "\n}"
+			23 response.function_call_arguments.done 1 chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/1 "{\n  \"city\": \"Paris\"\n}"
+			24 response.output_item.done 1 protocol.FunctionCall{ID:"chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/1", Status:"completed", CallID:"LsrzvhpPKdbtJyriZMr6ivjrWBgmWA3j", Name:"get_weather", Arguments:"{\n  \"city\": \"Paris\"\n}"}
+			25 response.completed 2 items`},
 		{"parallel_tool_calls", `
 			0 response.created in_progress
-			1 response.output_item.added 0 protocol.FunctionCall{ID:"chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/0", Status:"in_progress", CallID:"zzwGjyJxRF0NLM9cl3nvl9X1uykH0HJn", Name:"get_weather", Arguments:""}
-			2 response.function_call_arguments.delta 0 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/0 "{"
-			3 response.function_call_arguments.delta 0 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/0 "\"city"
-			4 response.function_call_arguments.delta 0 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/0 "\":"
-			5 response.function_call_arguments.delta 0 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/0 "\""
-			6 response.function_call_arguments.delta 0 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/0 "Paris"
-			7 response.function_call_arguments.delta 0 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/0 "\""
-			8 response.function_call_arguments.delta 0 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/0 "}"
-			9 response.function_call_arguments.done 0 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/0 "{\"city\":\"Paris\"}"
-			10 response.output_item.done 0 protocol.FunctionCall{ID:"chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/0", Status:"completed", CallID:"zzwGjyJxRF0NLM9cl3nvl9X1uykH0HJn", Name:"get_weather", Arguments:"{\"city\":\"Paris\"}"}
-			11 response.output_item.added 1 protocol.FunctionCall{ID:"chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/1", Status:"in_progress", CallID:"EXc5ifcsLJtON5nVlTOtEvXtYSHnWbgi", Name:"get_weather", Arguments:""}
-			12 response.function_call_arguments.delta 1 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/1 "{"
-			13 response.function_call_arguments.delta 1 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/1 "\"city"
-			14 response.function_call_arguments.delta 1 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/1 "\":"
-			15 response.function_call_arguments.delta 1 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/1 "\""
-			16 response.function_call_arguments.delta 1 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/1 "Tokyo"
-			17 response.function_call_arguments.delta 1 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/1 "\""
-			18 response.function_call_arguments.delta 1 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/1 "}"
-			19 response.function_call_arguments.done 1 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/1 "{\"city\":\"Tokyo\"}"
-			20 response.output_item.done 1 protocol.FunctionCall{ID:"chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/1", Status:"completed", CallID:"EXc5ifcsLJtON5nVlTOtEvXtYSHnWbgi", Name:"get_weather", Arguments:"{\"city\":\"Tokyo\"}"}
-			21 response.completed 2 items`},
+			1 response.output_item.added 0 protocol.Reasoning{ID:"chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/0", Content:[]protocol.ReasoningText(nil), Summary:[]protocol.SummaryText(nil), EncryptedContent:""}
+			2 response.content_part.added 0 0 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/0 protocol.ReasoningText{Text:""}
+			3-97 response.reasoning.delta 0 0 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/0, 95 deltas
+			98 response.reasoning.done 0 0 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/0 "The user is asking for the current weather in two different cities: Paris and Tokyo.\nI have a tool \x60get_weather\x60 that takes a \x60city\x60 as an argument.\nThe user explicitly requested to call the tool once for each city, in parallel.\n\nPlan:\n1. Call \x60get_weather(city=\"Paris\")\x60.\n2. Call \x60get_weather(city=\"Tokyo\")\x60.\n3. Present the results to the user."
+			99 response.content_part.done 0 0 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/0 protocol.ReasoningText{Text:"The user is asking for the current weather in two different cities: Paris and Tokyo.\nI have a tool \x60get_weather\x60 that takes a \x60city\x60 as an argument.\nThe user explicitly requested to call the tool once for each city, in parallel.\n\nPlan:\n1. Call \x60get_weather(city=\"Paris\")\x60.\n2. Call \x60get_weather(city=\"Tokyo\")\x60.\n3. Present the results to the user."}
+			100 response.output_item.done 0 protocol.Reasoning{ID:"chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/0", Content:[]protocol.ReasoningText{protocol.ReasoningText{Text:"The user is asking for the current weather in two different cities: Paris and Tokyo.\nI have a tool \x60get_weather\x60 that takes a \x60city\x60 as an argument.\nThe user explicitly requested to call the tool once for each city, in parallel.\n\nPlan:\n1. Call \x60get_weather(city=\"Paris\")\x60.\n2. Call \x60get_weather(city=\"Tokyo\")\x60.\n3. Present the results to the user."}}, Summary:[]protocol.SummaryText(nil), EncryptedContent:"spike-ai-pipeline:completions/v1:eyJyZWFzb25pbmdfY29udGVudCI6IlRoZSB1c2VyIGlzIGFza2luZyBmb3IgdGhlIGN1cnJlbnQgd2VhdGhlciBpbiB0d28gZGlmZmVyZW50IGNpdGllczogUGFyaXMgYW5kIFRva3lvLlxuSSBoYXZlIGEgdG9vbCBgZ2V0X3dlYXRoZXJgIHRoYXQgdGFrZXMgYSBgY2l0eWAgYXMgYW4gYXJndW1lbnQuXG5UaGUgdXNlciBleHBsaWNpdGx5IHJlcXVlc3RlZCB0byBjYWxsIHRoZSB0b29sIG9uY2UgZm9yIGVhY2ggY2l0eSwgaW4gcGFyYWxsZWwuXG5cblBsYW46XG4xLiBDYWxsIGBnZXRfd2VhdGhlcihjaXR5PVwiUGFyaXNcIilgLlxuMi4gQ2FsbCBgZ2V0X3dlYXRoZXIoY2l0eT1cIlRva3lvXCIpYC5cbjMuIFByZXNlbnQgdGhlIHJlc3VsdHMgdG8gdGhlIHVzZXIuIn0="}
+			101 response.output_item.added 1 protocol.FunctionCall{ID:"chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/1", Status:"in_progress", CallID:"zzwGjyJxRF0NLM9cl3nvl9X1uykH0HJn", Name:"get_weather", Arguments:""}
+			102 response.function_call_arguments.delta 1 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/1 "{"
+			103 response.function_call_arguments.delta 1 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/1 "\"city"
+			104 response.function_call_arguments.delta 1 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/1 "\":"
+			105 response.function_call_arguments.delta 1 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/1 "\""
+			106 response.function_call_arguments.delta 1 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/1 "Paris"
+			107 response.function_call_arguments.delta 1 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/1 "\""
+			108 response.function_call_arguments.delta 1 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/1 "}"
+			109 response.function_call_arguments.done 1 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/1 "{\"city\":\"Paris\"}"
+			110 response.output_item.done 1 protocol.FunctionCall{ID:"chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/1", Status:"completed", CallID:"zzwGjyJxRF0NLM9cl3nvl9X1uykH0HJn", Name:"get_weather", Arguments:"{\"city\":\"Paris\"}"}
+			111 response.output_item.added 2 protocol.FunctionCall{ID:"chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/2", Status:"in_progress", CallID:"EXc5ifcsLJtON5nVlTOtEvXtYSHnWbgi", Name:"get_weather", Arguments:""}
+			112 response.function_call_arguments.delta 2 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/2 "{"
+			113 response.function_call_arguments.delta 2 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/2 "\"city"
+			114 response.function_call_arguments.delta 2 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/2 "\":"
+			115 response.function_call_arguments.delta 2 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/2 "\""
+			116 response.function_call_arguments.delta 2 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/2 "Tokyo"
+			117 response.function_call_arguments.delta 2 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/2 "\""
+			118 response.function_call_arguments.delta 2 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/2 "}"
+			119 response.function_call_arguments.done 2 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/2 "{\"city\":\"Tokyo\"}"
+			120 response.output_item.done 2 protocol.FunctionCall{ID:"chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/2", Status:"completed", CallID:"EXc5ifcsLJtON5nVlTOtEvXtYSHnWbgi", Name:"get_weather", Arguments:"{\"city\":\"Tokyo\"}"}
+			121 response.completed 3 items`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -542,6 +578,131 @@ func TestStreamToolCalls(t *testing.T) {
 	}
 }
 
+// TestStreamReasoning covers the reasoning item: it comes first, its one reasoning_text part
+// streamed as reasoning deltas; it closes, of no status, when the message or a call begins, or at
+// the finish_reason; its output_item.done carries the envelope DecodeResponse gives the same
+// reasoning; and it folds to what DecodeResponse gives for the same reply.
+func TestStreamReasoning(t *testing.T) {
+	cases := []struct {
+		name   string
+		chunks []string
+		trace  string
+		reply  string
+	}{
+		{
+			name: "reasoning and content in one chunk",
+			chunks: []string{
+				delta(`{"role":"assistant","content":null}`, ""),
+				delta(`{"reasoning_content":"The user"}`, ""),
+				delta(`{"reasoning_content":" asks.","content":"Paris"}`, ""),
+				delta(`{}`, "stop"),
+				usageChunk, "[DONE]",
+			},
+			trace: `
+				0 response.created in_progress
+				1 response.output_item.added 0 protocol.Reasoning{ID:"chatcmpl-1/0", Content:[]protocol.ReasoningText(nil), Summary:[]protocol.SummaryText(nil), EncryptedContent:""}
+				2 response.content_part.added 0 0 chatcmpl-1/0 protocol.ReasoningText{Text:""}
+				3-4 response.reasoning.delta 0 0 chatcmpl-1/0, 2 deltas
+				5 response.reasoning.done 0 0 chatcmpl-1/0 "The user asks."
+				6 response.content_part.done 0 0 chatcmpl-1/0 protocol.ReasoningText{Text:"The user asks."}
+				7 response.output_item.done 0 protocol.Reasoning{ID:"chatcmpl-1/0", Content:[]protocol.ReasoningText{protocol.ReasoningText{Text:"The user asks."}}, Summary:[]protocol.SummaryText(nil), EncryptedContent:"` + envelopeUserAsks + `"}
+				8 response.output_item.added 1 protocol.Message{ID:"chatcmpl-1/1", Status:"in_progress", Role:"assistant", Content:[]protocol.ContentPart(nil)}
+				9 response.content_part.added 1 0 chatcmpl-1/1 protocol.OutputText{Text:""}
+				10 response.output_text.delta 1 0 chatcmpl-1/1 "Paris"
+				11 response.output_text.done 1 0 chatcmpl-1/1 "Paris"
+				12 response.content_part.done 1 0 chatcmpl-1/1 protocol.OutputText{Text:"Paris"}
+				13 response.output_item.done 1 protocol.Message{ID:"chatcmpl-1/1", Status:"completed", Role:"assistant", Content:[]protocol.ContentPart{protocol.OutputText{Text:"Paris"}}}
+				14 response.completed 2 items`,
+			reply: `{"id":"chatcmpl-1","choices":[{"message":{"content":"Paris","reasoning_content":"The user asks."},"finish_reason":"stop"}],
+				"usage":{"completion_tokens":5,"prompt_tokens":7,"total_tokens":12}}`,
+		},
+		{
+			name: "reasoning, then a call",
+			chunks: []string{
+				delta(`{"reasoning_content":"Need the weather tool."}`, ""),
+				delta(callDelta(0, "c1", "get_weather", `{"city":"Paris"}`), ""),
+				delta(`{}`, "tool_calls"),
+			},
+			trace: `
+				0 response.created in_progress
+				1 response.output_item.added 0 protocol.Reasoning{ID:"chatcmpl-1/0", Content:[]protocol.ReasoningText(nil), Summary:[]protocol.SummaryText(nil), EncryptedContent:""}
+				2 response.content_part.added 0 0 chatcmpl-1/0 protocol.ReasoningText{Text:""}
+				3 response.reasoning.delta 0 0 chatcmpl-1/0 "Need the weather tool."
+				4 response.reasoning.done 0 0 chatcmpl-1/0 "Need the weather tool."
+				5 response.content_part.done 0 0 chatcmpl-1/0 protocol.ReasoningText{Text:"Need the weather tool."}
+				6 response.output_item.done 0 protocol.Reasoning{ID:"chatcmpl-1/0", Content:[]protocol.ReasoningText{protocol.ReasoningText{Text:"Need the weather tool."}}, Summary:[]protocol.SummaryText(nil), EncryptedContent:"` + envelopeWeatherTool + `"}
+				7 response.output_item.added 1 protocol.FunctionCall{ID:"chatcmpl-1/1", Status:"in_progress", CallID:"c1", Name:"get_weather", Arguments:""}
+				8 response.function_call_arguments.delta 1 chatcmpl-1/1 "{\"city\":\"Paris\"}"
+				9 response.function_call_arguments.done 1 chatcmpl-1/1 "{\"city\":\"Paris\"}"
+				10 response.output_item.done 1 protocol.FunctionCall{ID:"chatcmpl-1/1", Status:"completed", CallID:"c1", Name:"get_weather", Arguments:"{\"city\":\"Paris\"}"}
+				11 response.completed 2 items`,
+			reply: `{"id":"chatcmpl-1","choices":[{"message":{"reasoning_content":"Need the weather tool.","tool_calls":[
+					{"id":"c1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}}]},
+				"finish_reason":"tool_calls"}]}`,
+		},
+		{
+			name: "reasoning alone, cut off at the bound",
+			chunks: []string{
+				delta(`{"reasoning_content":"The user"}`, ""),
+				delta(`{"reasoning_content":" asks."}`, "length"),
+				usageChunk,
+			},
+			trace: `
+				0 response.created in_progress
+				1 response.output_item.added 0 protocol.Reasoning{ID:"chatcmpl-1/0", Content:[]protocol.ReasoningText(nil), Summary:[]protocol.SummaryText(nil), EncryptedContent:""}
+				2 response.content_part.added 0 0 chatcmpl-1/0 protocol.ReasoningText{Text:""}
+				3-4 response.reasoning.delta 0 0 chatcmpl-1/0, 2 deltas
+				5 response.reasoning.done 0 0 chatcmpl-1/0 "The user asks."
+				6 response.content_part.done 0 0 chatcmpl-1/0 protocol.ReasoningText{Text:"The user asks."}
+				7 response.output_item.done 0 protocol.Reasoning{ID:"chatcmpl-1/0", Content:[]protocol.ReasoningText{protocol.ReasoningText{Text:"The user asks."}}, Summary:[]protocol.SummaryText(nil), EncryptedContent:"` + envelopeUserAsks + `"}
+				8 response.incomplete 1 items`,
+			reply: `{"id":"chatcmpl-1","choices":[{"message":{"content":"","reasoning_content":"The user asks."},"finish_reason":"length"}],
+				"usage":{"completion_tokens":5,"prompt_tokens":7,"total_tokens":12}}`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := decodeStream(t, stream(tc.chunks...))
+			if r.err != nil {
+				t.Fatalf("stream error: %v", r.err)
+			}
+			assertTrace(t, r.events, tc.trace)
+			want, err := decode(tc.reply)
+			if err != nil {
+				t.Fatalf("DecodeResponse: %v", err)
+			}
+			assertResponse(t, fold(t, r.events), want)
+		})
+	}
+}
+
+// TestStreamReasoningRoundTrip folds the recorded reasoning and tool call stream, sends its
+// output back with the call's output, and wants the reasoning the stream carried on the assistant
+// message that makes the call, as an unstreamed reply's would be.
+func TestStreamReasoningRoundTrip(t *testing.T) {
+	r := decodeStream(t, readTestdata(t, "tool_call.sse"))
+	if r.err != nil {
+		t.Fatalf("stream error: %v", r.err)
+	}
+	resp := fold(t, r.events)
+	call, ok := resp.Output[1].(protocol.FunctionCall)
+	if !ok {
+		t.Fatalf("Output[1] = %#v, want the function call", resp.Output[1])
+	}
+	req := &protocol.Request{
+		Model: "m",
+		Input: []protocol.Item{text(protocol.RoleUser, "What is the weather in Paris right now?")},
+	}
+	req.Input = append(req.Input, resp.Output...)
+	req.Input = append(req.Input, protocol.FunctionCallOutput{CallID: call.CallID, Output: "21"})
+	assertJSON(t, encode(t, req), `{"model":"m","stream":false,"messages":[
+		{"role":"user","content":"What is the weather in Paris right now?"},
+		{"role":"assistant","reasoning_content":"We need to call function get_weather.","tool_calls":[
+			{"id":"LsrzvhpPKdbtJyriZMr6ivjrWBgmWA3j","type":"function",
+				"function":{"name":"get_weather","arguments":"{\n  \"city\": \"Paris\"\n}"}}]},
+		{"role":"tool","tool_call_id":"LsrzvhpPKdbtJyriZMr6ivjrWBgmWA3j","content":"21"}]}`)
+}
+
 // TestStreamNoReplyID wants a stream whose chunks carry no id to give its message no id, as
 // DecodeResponse gives the same reply: there is nothing to derive one from.
 func TestStreamNoReplyID(t *testing.T) {
@@ -632,6 +793,9 @@ func TestStreamRefusesChunk(t *testing.T) {
 		{"a first fragment of another type", []string{delta(strings.Replace(callDelta(0, "c1", "get_weather", "{}"), `"function"`, `"custom"`, 1), "")}, `tool call 0 has unknown type "custom"`},
 		{"a fragment naming another call", []string{delta(callDelta(0, "c1", "get_weather", "{"), ""), delta(callDelta(0, "c2", "get_weather", "}"), "")}, `a fragment of tool call 0 names call "c2"`},
 		{"message text after a call", []string{delta(callDelta(0, "c1", "get_weather", "{}"), ""), text}, "message text after a tool call"},
+		{"reasoning after the message", []string{text, delta(`{"reasoning_content":"Hm."}`, "")}, "reasoning after the message or a tool call"},
+		{"reasoning after a call", []string{delta(callDelta(0, "c1", "get_weather", "{}"), ""), delta(`{"reasoning_content":"Hm."}`, "")}, "reasoning after the message or a tool call"},
+		{"reasoning after the finish_reason", []string{text, delta(`{}`, "stop"), delta(`{"reasoning_content":"Hm."}`, "")}, "delta after the finish_reason"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

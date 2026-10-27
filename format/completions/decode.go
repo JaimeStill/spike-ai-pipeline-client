@@ -171,7 +171,16 @@ func (*Format) DecodeError(body []byte) (message, typ, code string) {
 // [DONE] that ends the stream. Of each chunk it reads the id, the first choice, index 0, and the usage.
 //
 // The first event opens the stream with response.created, its response in_progress. The
-// choice's content and refusal deltas make the assistant message: output_item.added, in
+// choice's reasoning_content deltas make the reasoning item, first in the output, as
+// DecodeResponse orders it: output_item.added, with no content, when the first of them arrives,
+// then its one reasoning_text part, with content_part.added, a reasoning.delta for each, and at
+// its close reasoning.done and content_part.done, and output_item.done carrying the whole item.
+// The item closes when the message's content, or the first tool call, begins, or at the
+// finish_reason, and its output_item.done carries the encrypted_content envelope DecodeResponse
+// gives the same reasoning, which EncodeRequest reads back, so the folded Response can be sent
+// back as it came. Reasoning has no status, so the item takes none.
+//
+// The choice's content and refusal deltas then make the assistant message: output_item.added, in
 // progress, when the first of them arrives; then for each run of content, or of refusal, a
 // part, output_text or refusal, with content_part.added, its deltas, its done event, and
 // content_part.done; and output_item.done carrying the whole message. A delta that is empty
@@ -185,13 +194,14 @@ func (*Format) DecodeError(body []byte) (message, typ, code string) {
 // function_call_arguments.done, its arguments the deltas joined, and output_item.done carrying the
 // whole call. Calls are made one after another, in the order of their indexes, so a fragment of
 // a call already closed is an error, as is a first fragment of another type or with no name, a
-// later fragment naming another id or function, and message text after a call has begun: the
-// output keeps DecodeResponse's order, the message ahead of the calls.
+// later fragment naming another id or function, message text after a call has begun, and
+// reasoning after the message or a call has begun: the output keeps DecodeResponse's order,
+// reasoning, then the message, then the calls.
 //
 // An item closed because a later one began is completed. The item open when the finish_reason
 // arrives closes then, taking the status it gives, as DecodeResponse maps it, so only the last
-// item can be incomplete. It translates the message and its calls alone: a chunk's other members,
-// reasoning_content among them, are ignored.
+// item can be incomplete; a reasoning item, which has no status, takes none. It translates the
+// reasoning, the message, and its calls alone: a chunk's other members are ignored.
 //
 // The stream ends at data [DONE], or at the end of the stream once the finish_reason has
 // arrived, where it closes with the terminal event: response.completed or
@@ -223,6 +233,8 @@ type streamDecoder struct {
 	usage    protocol.Usage
 	// output is the items done, in output order.
 	output []protocol.Item
+	// reasoning is the reasoning item open, nil when none is.
+	reasoning *streamReasoning
 	// message is the message open, nil when none is.
 	message *streamMessage
 	// call is the function call open, nil when none is; called is set once the first call is
@@ -243,6 +255,15 @@ type streamMessage struct {
 	// part is the part open: partText or partRefusal, or partNone when none is. text is its
 	// text so far.
 	part partKind
+	text strings.Builder
+}
+
+// streamReasoning is the reasoning item a stream is making, of one reasoning_text part.
+type streamReasoning struct {
+	// id is the item's id, and index its place in the output.
+	id    string
+	index int
+	// text is the reasoning so far.
 	text strings.Builder
 }
 
@@ -310,8 +331,11 @@ func (d *streamDecoder) decode(data []byte) error {
 			continue
 		}
 		delta := choice.Delta
-		if d.finished && (delta.Content+delta.Refusal != "" || len(delta.ToolCalls) > 0) {
+		if d.finished && (delta.ReasoningContent+delta.Content+delta.Refusal != "" || len(delta.ToolCalls) > 0) {
 			return errors.New("delta after the finish_reason")
+		}
+		if err := d.reason(delta.ReasoningContent); err != nil {
+			return err
 		}
 		if err := d.delta(partText, delta.Content); err != nil {
 			return err
@@ -333,6 +357,9 @@ func (d *streamDecoder) decode(data []byte) error {
 				return fmt.Errorf("chunk has unknown finish_reason %q", choice.FinishReason)
 			}
 			d.finished = true
+			if err := d.closeReasoning(); err != nil {
+				return err
+			}
 			d.closeMessage(d.status)
 			d.closeCall(d.status)
 		}
@@ -374,14 +401,63 @@ func (d *streamDecoder) end() error {
 	return nil
 }
 
+// reason appends text to the reasoning item, opening it, and its reasoning_text part, when it
+// isn't open. An empty text makes nothing; text once the message or a call has begun is an
+// error.
+func (d *streamDecoder) reason(text string) error {
+	if text == "" {
+		return nil
+	}
+	r := d.reasoning
+	if r == nil {
+		if d.message != nil || d.called {
+			return errors.New("reasoning after the message or a tool call")
+		}
+		r = &streamReasoning{id: itemID(d.id, len(d.output)), index: len(d.output)}
+		d.reasoning = r
+		d.emit(protocol.OutputItemAdded{SequenceNumber: d.next(), OutputIndex: r.index, Item: protocol.Reasoning{ID: r.id}})
+		d.emit(protocol.ContentPartAdded{SequenceNumber: d.next(), ItemID: r.id, OutputIndex: r.index, Part: protocol.ReasoningText{}})
+	}
+	r.text.WriteString(text)
+	d.emit(protocol.ReasoningDelta{SequenceNumber: d.next(), ItemID: r.id, OutputIndex: r.index, Delta: text})
+	return nil
+}
+
+// closeReasoning closes the open reasoning item, if there is one: reasoning.done,
+// content_part.done, then output_item.done carrying the whole item, its encrypted_content the
+// envelope DecodeResponse gives the same reasoning.
+func (d *streamDecoder) closeReasoning() error {
+	r := d.reasoning
+	if r == nil {
+		return nil
+	}
+	text := r.text.String()
+	sealed, err := sealEnvelope(envelope{ReasoningContent: text})
+	if err != nil {
+		return fmt.Errorf("reasoning: %w", err)
+	}
+	part := protocol.ReasoningText{Text: text}
+	d.emit(protocol.ReasoningDone{SequenceNumber: d.next(), ItemID: r.id, OutputIndex: r.index, Text: text})
+	d.emit(protocol.ContentPartDone{SequenceNumber: d.next(), ItemID: r.id, OutputIndex: r.index, Part: part})
+	item := protocol.Reasoning{ID: r.id, Content: []protocol.ReasoningText{part}, EncryptedContent: sealed}
+	d.emit(protocol.OutputItemDone{SequenceNumber: d.next(), OutputIndex: r.index, Item: item})
+	d.output = append(d.output, item)
+	d.reasoning = nil
+	return nil
+}
+
 // delta appends text to the message's open part of kind, opening the message, and the part,
-// when it isn't open. An empty text makes nothing; text once a call has begun is an error.
+// when it isn't open, and closing the reasoning item. An empty text makes nothing; text once a
+// call has begun is an error.
 func (d *streamDecoder) delta(kind partKind, text string) error {
 	if text == "" {
 		return nil
 	}
 	if d.called {
 		return errors.New("message text after a tool call")
+	}
+	if err := d.closeReasoning(); err != nil {
+		return err
 	}
 	m := d.message
 	if m == nil {
@@ -412,7 +488,7 @@ func (d *streamDecoder) delta(kind partKind, text string) error {
 }
 
 // toolCall folds f, a tool call's fragment, as NewStreamDecoder describes: a call's first
-// fragment closes the item open and adds the call, and its argument text, and every later
+// fragment closes the items open and adds the call, and its argument text, and every later
 // fragment's, is a delta of the call's arguments.
 func (d *streamDecoder) toolCall(f toolCallDelta) error {
 	c := d.call
@@ -429,6 +505,9 @@ func (d *streamDecoder) toolCall(f toolCallDelta) error {
 		}
 		if f.Function.Name == "" {
 			return fmt.Errorf("tool call %d's first fragment has no function name", f.Index)
+		}
+		if err := d.closeReasoning(); err != nil {
+			return err
 		}
 		d.closeMessage(protocol.StatusCompleted)
 		d.closeCall(protocol.StatusCompleted)
