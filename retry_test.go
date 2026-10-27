@@ -277,6 +277,54 @@ func TestRetryConnectionFailure(t *testing.T) {
 	}
 }
 
+// TestRetryTokenSourceError has the token source fail under a policy, wrapping what the
+// policy would retry from the transport, and wants the error returned at once: the source
+// called once, one error, wrapping the source's, and no request sent. Its failure is the
+// source's own, before anything is sent, which a later attempt doesn't mend.
+func TestRetryTokenSourceError(t *testing.T) {
+	causes := []struct {
+		name string
+		err  error
+	}{
+		{"network operation", fmt.Errorf("fetch token: %w", &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED})},
+		{"connection closed", io.ErrUnexpectedEOF},
+	}
+	for _, op := range operations {
+		for _, cause := range causes {
+			t.Run(op.name+"/"+cause.name, func(t *testing.T) {
+				synctest.Test(t, func(t *testing.T) {
+					s := &script{steps: []step{{status: http.StatusOK, body: op.ok}}}
+					var calls int
+					c := newClient(t, client.Config{
+						BaseURL: "http://router/v1",
+						HTTP:    &http.Client{Transport: s},
+						Retry:   &policy,
+						Token: func(context.Context) (string, error) {
+							calls++
+							return "", cause.err
+						},
+					})
+					var errs []error
+					if op.name == "GenerateStream" {
+						_, _, errs = collect(t, c.GenerateStream(t.Context(), hello()))
+					} else if err := op.run(t.Context(), c); err != nil {
+						errs = []error{err}
+					}
+					if len(errs) != 1 || !errors.Is(errs[0], cause.err) || !strings.Contains(errs[0].Error(), "token: ") {
+						t.Errorf("%s errors = %v, want one token error wrapping %v", op.name, errs, cause.err)
+					}
+					if calls != 1 {
+						t.Errorf("token source called %d times, want 1", calls)
+					}
+					if len(s.sent) != 0 {
+						t.Errorf("%d requests sent, want 0", len(s.sent))
+					}
+				})
+			})
+		}
+	}
+}
+
 // TestRetryConnectionClosed has a real server close the first connection before replying, and
 // wants the request sent again and answered.
 func TestRetryConnectionClosed(t *testing.T) {

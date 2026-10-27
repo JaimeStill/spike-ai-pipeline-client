@@ -111,7 +111,7 @@ func (c *Client) Transcribe(ctx context.Context, req *TranscriptionRequest) (*Tr
 	}()
 	// One attempt, never retried: the clip is read as it is sent, so there is no second copy
 	// of it to send again.
-	resp, _, err := c.attempt(ctx, transcriptionsRoute, nil, pr, form.FormDataContentType(), "application/json",
+	resp, err := c.attempt(ctx, transcriptionsRoute, nil, pr, form.FormDataContentType(), "application/json",
 		format.DecodeOpenAIError)
 	var reply []byte
 	if err == nil {

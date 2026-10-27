@@ -161,26 +161,36 @@ func readReply(resp *http.Response) ([]byte, error) {
 	return reply, nil
 }
 
-// attempt sends body once as a POST of contentType to route, accepting accept, with header and
-// the bearer token, and returns a 2xx reply, its body unread, for the caller to read and close.
-// The token source is called before the request is made, so a source error sends nothing. A
-// body of unknown length, such as a pipe, goes chunked. A non-2xx reply is an *APIError, its body
-// read and closed and its details decoded by decodeError: the Client's format's for Generate and
-// GenerateStream, and the OpenAI-style decoder for the operations outside the Format. Its
-// Retry-After header is returned beside it, for send's wait.
+// attempt sends body once, as request builds it and do sends it, and returns do's reply. It is
+// the one-attempt path, for an operation that is never sent again.
 func (c *Client) attempt(ctx context.Context, route string, header http.Header, body io.Reader, contentType, accept string,
-	decodeError func(body []byte) (message, typ, code string)) (*http.Response, string, error) {
+	decodeError func(body []byte) (message, typ, code string)) (*http.Response, error) {
+	req, err := c.request(ctx, route, header, body, contentType, accept)
+	if err != nil {
+		return nil, err
+	}
+	resp, _, err := c.do(req, decodeError)
+	return resp, err
+}
+
+// request builds one attempt's POST of body, of contentType, to route, accepting accept, with
+// header and the bearer token. The token source is called here, before the request exists, so
+// a source error sends nothing. A body of unknown length, such as a pipe, goes chunked. Its
+// errors are every way an attempt fails before anything is sent, which is why it is apart from
+// do: send returns them at once, never classifying them for a retry, so a token source that
+// fails on its own network call isn't mistaken for the endpoint's connection failing.
+func (c *Client) request(ctx context.Context, route string, header http.Header, body io.Reader, contentType, accept string) (*http.Request, error) {
 	token := ""
 	if c.token != nil {
 		t, err := c.token(ctx)
 		if err != nil {
-			return nil, "", fmt.Errorf("token: %w", err)
+			return nil, fmt.Errorf("token: %w", err)
 		}
 		token = t
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint(route), body)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	maps.Copy(req.Header, header)
 	req.Header.Set("Content-Type", contentType)
@@ -188,6 +198,15 @@ func (c *Client) attempt(ctx context.Context, route string, header http.Header, 
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
+	return req, nil
+}
+
+// do sends req and returns a 2xx reply, its body unread, for the caller to read and close. A
+// non-2xx reply is an *APIError, its body read and closed and its details decoded by
+// decodeError: the Client's format's for Generate and GenerateStream, and the OpenAI-style
+// decoder for the operations outside the Format. Its Retry-After header is returned beside it,
+// for send's wait.
+func (c *Client) do(req *http.Request, decodeError func(body []byte) (message, typ, code string)) (*http.Response, string, error) {
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, "", err

@@ -88,16 +88,22 @@ func fullJitter(d time.Duration) time.Duration {
 }
 
 // send sends body as a POST of contentType to route, accepting accept, with header, and returns
-// a 2xx reply, its body unread, for the caller to read and close. Each attempt is attempt's,
-// sending the same body; with the Client's retry policy, an attempt that fails as RetryPolicy
-// describes is made again after the wait it describes. Every operation whose body is held whole
+// a 2xx reply, its body unread, for the caller to read and close. Each attempt is request's and
+// do's, sending the same body; with the Client's retry policy, an attempt that fails in do as
+// RetryPolicy describes is made again after the wait it describes. An attempt that fails in
+// request, before anything is sent, such as on the token source's error, is returned at once,
+// whatever its error wraps. Every operation whose body is held whole
 // sends through here, so this is the one retry loop: Generate, Embed, and GenerateStream, whose
 // stream starts only once send returns.
 func (c *Client) send(ctx context.Context, route string, header http.Header, body []byte, contentType, accept string,
 	decodeError func(body []byte) (message, typ, code string)) (*http.Response, error) {
 	attempts := max(c.retry.MaxAttempts, 1)
 	for n := 1; ; n++ {
-		resp, retryAfter, err := c.attempt(ctx, route, header, bytes.NewReader(body), contentType, accept, decodeError)
+		req, err := c.request(ctx, route, header, bytes.NewReader(body), contentType, accept)
+		if err != nil {
+			return nil, err
+		}
+		resp, retryAfter, err := c.do(req, decodeError)
 		if err == nil || n == attempts || !retryable(ctx, err) {
 			return resp, err
 		}
