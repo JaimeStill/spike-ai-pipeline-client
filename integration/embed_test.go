@@ -26,7 +26,7 @@ func TestEmbed(t *testing.T) {
 		"The cat sat on the warm windowsill all afternoon.",
 		"Quarterly revenue rose eight percent on strong cloud sales.",
 	}
-	pair, err := c.Embed(requestContext(t), client.EmbeddingRequest{Model: embeddingModel, Input: inputs})
+	pair, err := c.Embed(requestContext(t), &client.EmbeddingRequest{Model: embeddingModel, Input: inputs})
 	if err != nil {
 		t.Fatalf("Embed: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestEmbed(t *testing.T) {
 	if u := pair.Usage; u.PromptTokens == 0 || u.TotalTokens < u.PromptTokens {
 		t.Errorf("Usage = %+v, want prompt tokens counted, and total at least them", u)
 	}
-	alone, err := c.Embed(requestContext(t), client.EmbeddingRequest{Model: embeddingModel, Input: inputs[1:]})
+	alone, err := c.Embed(requestContext(t), &client.EmbeddingRequest{Model: embeddingModel, Input: inputs[1:]})
 	if err != nil {
 		t.Fatalf("Embed: %v", err)
 	}

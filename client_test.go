@@ -305,11 +305,20 @@ func TestGenerateWrapsCancelledContext(t *testing.T) {
 	}
 }
 
-// TestGenerateRefusesInvalidRequest covers when Generate validates: before the token source is
-// called or anything is sent. Which requests Validate refuses is protocol's test.
+// TestGenerateRefusesInvalidRequest covers when Generate refuses a request, whether Validate
+// refuses it or the format can't encode it: before the token source is called or anything is
+// sent. Which requests Validate refuses is protocol's test, and which the format refuses its.
 func TestGenerateRefusesInvalidRequest(t *testing.T) {
 	noModel := hello()
 	noModel.Model = ""
+	clash := hello()
+	clash.Native = []byte(`{"model":"other"}`)
+	modeNone := hello()
+	modeNone.Tools = []protocol.FunctionTool{{Name: "get_time"}}
+	modeNone.ToolChoice = protocol.AllowedToolChoice{
+		Tools: []protocol.FunctionToolChoice{{Name: "get_time"}},
+		Mode:  protocol.ToolChoiceNone,
+	}
 	cases := []struct {
 		name string
 		req  *protocol.Request
@@ -317,6 +326,8 @@ func TestGenerateRefusesInvalidRequest(t *testing.T) {
 	}{
 		{"nil", nil, "no request"},
 		{"no model", noModel, "no model"},
+		{"native clash, refused at encode", clash, "native member model clashes"},
+		{"allowed_tools of mode none, refused at encode", modeNone, "allowed_tools of mode none"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

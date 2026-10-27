@@ -20,14 +20,14 @@
 //   - [New] validates a Config and returns a Client.
 //   - [Client] makes requests of one endpoint in one format.
 //   - [Client.Generate] sends a Request and returns its Response.
-//   - [Client.Embed] sends an EmbeddingRequest to the OpenAI-compatible embeddings endpoint.
+//   - [Client.Embed] sends an *EmbeddingRequest to the OpenAI-compatible embeddings endpoint.
 //   - [EmbeddingRequest] is an embedding model, its inputs, and a native-tier field.
 //   - [Embeddings] is one vector per input, in input order, and usage.
 //   - [EmbeddingUsage] counts the tokens an embedding request took.
-//   - [Client.Transcribe] streams a TranscriptionRequest's clip to the OpenAI-compatible
+//   - [Client.Transcribe] streams a *TranscriptionRequest's clip to the OpenAI-compatible
 //     transcription endpoint as a multipart upload.
-//   - [TranscriptionRequest] is an audio model, the clip as a reader and its file name, and
-//     the optional language and prompt.
+//   - [TranscriptionRequest] is an audio model, the clip as a reader and its file name, the
+//     optional language and prompt, and a native-tier field of extra form fields.
 //   - [Transcription] is a clip's transcript and usage.
 //   - [TranscriptionUsage] counts the tokens a transcription took.
 //   - [APIError] is a non-2xx reply, matched with errors.As.

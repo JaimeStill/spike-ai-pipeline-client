@@ -6,7 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"mime/multipart"
+	"net/url"
+	"slices"
 
 	"github.com/JaimeStill/spike-ai-pipeline-client/format"
 )
@@ -18,11 +21,11 @@ const transcriptionsRoute = "audio/transcriptions"
 // the protocol and the Format: it goes to the OpenAI-compatible transcription endpoint whatever
 // format the Client speaks.
 //
-// The endpoint's other form fields are left out. response_format is always json, the one
+// The endpoint's other form fields are not typed. response_format is always json, the one
 // llama.cpp b11669 answers (it refuses text, srt, verbose_json, and vtt), so the reply carries
 // no timestamps, and timestamp_granularities, which only verbose_json honors, has nothing to
 // shape. temperature and max_tokens, which llama.cpp passes to its chat completion, and stream,
-// which changes the reply's shape, are not typed.
+// which changes the reply's shape, are left to Native.
 type TranscriptionRequest struct {
 	// Model is the audio model's id. It is required.
 	Model string
@@ -39,6 +42,15 @@ type TranscriptionRequest struct {
 	// reads it as preceding context, while llama.cpp b11669 sends it to the model in place of its
 	// own transcription instruction.
 	Prompt string
+	// Native is the native tier: form fields sent as they are beside the typed ones, for a
+	// feature of the endpoint the typed fields don't cover, such as temperature. Each key goes
+	// out as a field once per value, keys in sorted order and each key's values in order, after
+	// the typed fields and before the file. Its fields mean what the endpoint makes them mean;
+	// one that changes the reply's shape, such as stream, makes a reply Transcribe can't decode.
+	// A key that clashes with a field the typed fields set is refused: model, response_format,
+	// and file always, and language and prompt when Language and Prompt are set. So is an empty
+	// key, which names no field.
+	Native url.Values
 }
 
 // Transcription is an audio model's transcript of a clip.
@@ -61,11 +73,12 @@ type TranscriptionUsage struct {
 }
 
 // Transcribe uploads req's clip to the endpoint's transcription route and returns its
-// transcript. It refuses a request with no model, file, or file name before the token source is
-// called or anything is sent.
+// transcript. It refuses a nil request, one with no model, file, or file name, and a Native key
+// that is empty or clashes with a typed field, before the token source is called or anything is
+// sent.
 //
 // The upload streams: a goroutine writes the multipart form (the model, response_format json,
-// the language and prompt when set, then the file) into a pipe the request reads, so the clip is
+// the language and prompt when set, Native's fields, then the file) into a pipe the request reads, so the clip is
 // read as it is sent, never held whole, and goes chunked, its length unknown. Transcribe returns
 // only once that goroutine has ended, so it has stopped reading File: when the request ends
 // first (a cancelled ctx, a transport failure, an early reply), the pipe is closed and the
@@ -75,24 +88,22 @@ type TranscriptionUsage struct {
 // A File read error is returned wrapped, ahead of whatever the transport made of the upload it
 // cut short. A transport failure or a cancelled ctx is returned wrapped too. A non-2xx reply is
 // an *APIError with the OpenAI-style error body's details.
-func (c *Client) Transcribe(ctx context.Context, req TranscriptionRequest) (*Transcription, error) {
-	switch {
-	case req.Model == "":
-		return nil, errors.New("client: transcribe: request has no model")
-	case req.File == nil:
-		return nil, errors.New("client: transcribe: request has no file")
-	case req.FileName == "":
-		return nil, errors.New("client: transcribe: request has no file name")
+func (c *Client) Transcribe(ctx context.Context, req *TranscriptionRequest) (*Transcription, error) {
+	if req == nil {
+		return nil, errors.New("client: transcribe: no request")
+	}
+	fields, err := transcriptionFields(req)
+	if err != nil {
+		return nil, fmt.Errorf("client: transcribe: %w", err)
 	}
 	file := &clipReader{r: req.File}
-	req.File = file
 	pr, pw := io.Pipe()
 	form := multipart.NewWriter(pw)
 	uploaded := make(chan struct{})
 	go func() {
 		defer close(uploaded)
 		// The writer's error, or EOF on nil, ends the request body's read.
-		pw.CloseWithError(writeTranscriptionForm(form, req))
+		pw.CloseWithError(writeTranscriptionForm(form, fields, req.FileName, file))
 	}()
 	reply, err := c.post(ctx, transcriptionsRoute, nil, pr, form.FormDataContentType(), format.DecodeOpenAIError)
 	// A request that ended before reading the whole form leaves the goroutine blocked on the
@@ -116,9 +127,18 @@ func (c *Client) Transcribe(ctx context.Context, req TranscriptionRequest) (*Tra
 	return t, nil
 }
 
-// writeTranscriptionForm writes req as the transcription endpoint's multipart form, the file
-// last, and closes the form.
-func writeTranscriptionForm(form *multipart.Writer, req TranscriptionRequest) error {
+// transcriptionFields validates req and returns the form fields it sends ahead of the file, in
+// order: the typed fields, then Native's. The file part's name, file, is always set, so a Native
+// key of that name clashes too.
+func transcriptionFields(req *TranscriptionRequest) ([][2]string, error) {
+	switch {
+	case req.Model == "":
+		return nil, errors.New("request has no model")
+	case req.File == nil:
+		return nil, errors.New("request has no file")
+	case req.FileName == "":
+		return nil, errors.New("request has no file name")
+	}
 	fields := [][2]string{{"model", req.Model}, {"response_format", "json"}}
 	if req.Language != "" {
 		fields = append(fields, [2]string{"language", req.Language})
@@ -126,6 +146,28 @@ func writeTranscriptionForm(form *multipart.Writer, req TranscriptionRequest) er
 	if req.Prompt != "" {
 		fields = append(fields, [2]string{"prompt", req.Prompt})
 	}
+	set := map[string]bool{"file": true}
+	for _, f := range fields {
+		set[f[0]] = true
+	}
+	// Sorted keys make the form the same for the same request, whatever the map's order.
+	for _, k := range slices.Sorted(maps.Keys(req.Native)) {
+		switch {
+		case k == "":
+			return nil, errors.New("request's native field has an empty name")
+		case set[k]:
+			return nil, fmt.Errorf("native field %s clashes with a field the request sets", k)
+		}
+		for _, v := range req.Native[k] {
+			fields = append(fields, [2]string{k, v})
+		}
+	}
+	return fields, nil
+}
+
+// writeTranscriptionForm writes fields, then file as the file part named fileName, as the
+// transcription endpoint's multipart form, and closes the form.
+func writeTranscriptionForm(form *multipart.Writer, fields [][2]string, fileName string, file io.Reader) error {
 	for _, f := range fields {
 		if err := form.WriteField(f[0], f[1]); err != nil {
 			return err
@@ -134,11 +176,11 @@ func writeTranscriptionForm(form *multipart.Writer, req TranscriptionRequest) er
 	// The part's Content-Type is application/octet-stream: a type guessed from the file name
 	// would depend on the host's MIME tables, and llama.cpp reads the clip's format from its
 	// bytes.
-	part, err := form.CreateFormFile("file", req.FileName)
+	part, err := form.CreateFormFile("file", fileName)
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(part, req.File); err != nil {
+	if _, err := io.Copy(part, file); err != nil {
 		return err
 	}
 	return form.Close()

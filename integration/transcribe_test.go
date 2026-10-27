@@ -19,7 +19,7 @@ func TestTranscribe(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = f.Close() }()
-	got, err := c.Transcribe(requestContext(t), client.TranscriptionRequest{
+	got, err := c.Transcribe(requestContext(t), &client.TranscriptionRequest{
 		Model:    audioModel,
 		File:     f,
 		FileName: "phrase.wav",

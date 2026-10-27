@@ -8,30 +8,32 @@ import (
 	"strings"
 	"testing"
 
-	client "github.com/JaimeStill/spike-ai-pipeline-client"
 	"github.com/JaimeStill/spike-ai-pipeline-client/format/completions"
-	"github.com/JaimeStill/spike-ai-pipeline-client/internal/clienttest"
 	"github.com/JaimeStill/spike-ai-pipeline-client/protocol"
 )
 
-// okReply is a reply that decodes to a completed response.
-const okReply = `{"choices":[{"message":{"role":"assistant","content":"Paris"},"finish_reason":"stop"}]}`
-
-// generate sends req through a Chat Completions client to a server answering reply, and returns
-// the server, which holds what arrived on the wire, and Generate's results.
-func generate(t *testing.T, reply string, req *protocol.Request) (*clienttest.Server, *protocol.Response, error) {
+// encode encodes req, failing t if it is invalid or EncodeRequest refuses it, or if
+// EncodeRequest adds a header, which the format never does. The client validates every request
+// before encoding it, so a request the format is given here is a valid one.
+func encode(t *testing.T, req *protocol.Request) []byte {
 	t.Helper()
-	srv := clienttest.NewServer(t, http.StatusOK, reply)
-	c, err := client.New(client.Config{
-		BaseURL: srv.URL + "/v1",
-		HTTP:    http.DefaultClient,
-		Format:  completions.New(),
-	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
+	if err := req.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
 	}
-	resp, err := c.Generate(t.Context(), req)
-	return srv, resp, err
+	header := make(http.Header)
+	body, err := completions.New().EncodeRequest(req, header)
+	if err != nil {
+		t.Fatalf("EncodeRequest: %v", err)
+	}
+	if len(header) != 0 {
+		t.Errorf("EncodeRequest added headers %v, want none", header)
+	}
+	return body
+}
+
+// decode decodes reply as the body of a 2xx reply.
+func decode(reply string) (*protocol.Response, error) {
+	return completions.New().DecodeResponse([]byte(reply))
 }
 
 // assertJSON fails t unless got and want are the same JSON, ignoring member order and spacing.
@@ -547,16 +549,14 @@ func TestEncode(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			srv, _, err := generate(t, okReply, tc.req)
-			if err != nil {
-				t.Fatalf("Generate: %v", err)
-			}
-			got := srv.Only(t)
-			if got.Path != "/v1/chat/completions" {
-				t.Errorf("path = %q, want /v1/chat/completions", got.Path)
-			}
-			assertJSON(t, got.Body, tc.want)
+			assertJSON(t, encode(t, tc.req), tc.want)
 		})
+	}
+}
+
+func TestRoute(t *testing.T) {
+	if got := completions.New().Route(); got != "chat/completions" {
+		t.Errorf("Route = %q, want chat/completions", got)
 	}
 }
 
@@ -579,9 +579,9 @@ func TestReasoningRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	req := &protocol.Request{Model: "m", Input: []protocol.Item{text(protocol.RoleUser, "Weather in Paris?")}}
-	_, resp, err := generate(t, string(reply), req)
+	resp, err := decode(string(reply))
 	if err != nil {
-		t.Fatalf("Generate: %v", err)
+		t.Fatalf("DecodeResponse: %v", err)
 	}
 	r, ok := resp.Output[0].(protocol.Reasoning)
 	if !ok || len(r.Content) != 1 || r.Content[0].Text != reasoningContent {
@@ -589,17 +589,13 @@ func TestReasoningRoundTrip(t *testing.T) {
 	}
 	req.Input = append(req.Input, resp.Output...)
 	req.Input = append(req.Input, protocol.FunctionCallOutput{CallID: "c1", Output: "21"})
-	srv, _, err := generate(t, okReply, req)
-	if err != nil {
-		t.Fatalf("Generate with the output: %v", err)
-	}
 	var body struct {
 		Messages []struct {
 			Role             string `json:"role"`
 			ReasoningContent string `json:"reasoning_content"`
 		} `json:"messages"`
 	}
-	if err := json.Unmarshal(srv.Only(t).Body, &body); err != nil {
+	if err := json.Unmarshal(encode(t, req), &body); err != nil {
 		t.Fatal(err)
 	}
 	if len(body.Messages) != 3 || body.Messages[1].Role != "assistant" {
@@ -627,40 +623,34 @@ func TestEncodeRefusesNativeClash(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			srv, resp, err := generate(t, okReply, &protocol.Request{
+			body, err := completions.New().EncodeRequest(&protocol.Request{
 				Model:           "m",
 				Input:           []protocol.Item{text(protocol.RoleUser, "hi")},
 				MaxOutputTokens: tc.max,
 				Text:            tc.text,
 				Native:          jsontext.Value(tc.native),
-			})
+			}, make(http.Header))
 			if err == nil {
-				t.Fatalf("Generate = %v, nil; want a clash error", resp)
+				t.Fatalf("EncodeRequest = %s, nil; want a clash error", body)
 			}
 			want := "native member " + tc.member + " clashes"
 			if !strings.Contains(err.Error(), want) {
-				t.Errorf("Generate error = %q, want it to contain %q", err, want)
-			}
-			if n := len(srv.Requests()); n != 0 {
-				t.Errorf("server received %d requests, want 0", n)
+				t.Errorf("EncodeRequest error = %q, want it to contain %q", err, want)
 			}
 		})
 	}
 }
 
 func TestEncodeRefusesAllowedToolsModeNone(t *testing.T) {
-	srv, resp, err := generate(t, okReply, withTools(protocol.AllowedToolChoice{
+	body, err := completions.New().EncodeRequest(withTools(protocol.AllowedToolChoice{
 		Tools: []protocol.FunctionToolChoice{{Name: "get_time"}},
 		Mode:  protocol.ToolChoiceNone,
-	}))
+	}), make(http.Header))
 	if err == nil {
-		t.Fatalf("Generate = %v, nil; want an error", resp)
+		t.Fatalf("EncodeRequest = %s, nil; want an error", body)
 	}
 	if want := "allowed_tools of mode none has no Chat Completions form"; !strings.Contains(err.Error(), want) {
-		t.Errorf("Generate error = %q, want it to contain %q", err, want)
-	}
-	if n := len(srv.Requests()); n != 0 {
-		t.Errorf("server received %d requests, want 0", n)
+		t.Errorf("EncodeRequest error = %q, want it to contain %q", err, want)
 	}
 }
 
@@ -678,9 +668,9 @@ func TestDecodeFinishReason(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.reason, func(t *testing.T) {
 			reply := `{"choices":[{"message":{"role":"assistant","content":"Paris"},"finish_reason":"` + tc.reason + `"}]}`
-			_, resp, err := generate(t, reply, &protocol.Request{Model: "m", Input: []protocol.Item{text(protocol.RoleUser, "hi")}})
+			resp, err := decode(reply)
 			if err != nil {
-				t.Fatalf("Generate: %v", err)
+				t.Fatalf("DecodeResponse: %v", err)
 			}
 			if resp.Status != tc.status {
 				t.Errorf("Status = %q, want %q", resp.Status, tc.status)
@@ -701,7 +691,6 @@ func TestDecodeFinishReason(t *testing.T) {
 }
 
 func TestDecode(t *testing.T) {
-	req := &protocol.Request{Model: "m", Input: []protocol.Item{text(protocol.RoleUser, "hi")}}
 	cases := []struct {
 		name  string
 		reply string
@@ -865,12 +854,12 @@ func TestDecode(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, resp, err := generate(t, tc.reply, req)
+			resp, err := decode(tc.reply)
 			if err != nil {
-				t.Fatalf("Generate: %v", err)
+				t.Fatalf("DecodeResponse: %v", err)
 			}
 			if !reflect.DeepEqual(resp, tc.want) {
-				t.Errorf("Generate = %#v\nwant      %#v", resp, tc.want)
+				t.Errorf("DecodeResponse = %#v\nwant            %#v", resp, tc.want)
 			}
 		})
 	}
@@ -892,12 +881,12 @@ func TestDecodeRefusesReply(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, resp, err := generate(t, tc.reply, &protocol.Request{Model: "m", Input: []protocol.Item{text(protocol.RoleUser, "hi")}})
+			resp, err := decode(tc.reply)
 			if err == nil {
-				t.Fatalf("Generate = %v, nil; want an error containing %q", resp, tc.want)
+				t.Fatalf("DecodeResponse = %v, nil; want an error containing %q", resp, tc.want)
 			}
 			if !strings.Contains(err.Error(), tc.want) {
-				t.Errorf("Generate error = %q, want it to contain %q", err, tc.want)
+				t.Errorf("DecodeResponse error = %q, want it to contain %q", err, tc.want)
 			}
 		})
 	}

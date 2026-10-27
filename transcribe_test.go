@@ -81,20 +81,28 @@ func TestTranscribeWireRequest(t *testing.T) {
 	audio := clip(64 << 10)
 	cases := []struct {
 		name   string
-		req    client.TranscriptionRequest
+		req    *client.TranscriptionRequest
 		fields map[string]string
 	}{
 		{
 			"required fields",
-			client.TranscriptionRequest{Model: "m", File: bytes.NewReader(audio), FileName: "clip.wav"},
+			&client.TranscriptionRequest{Model: "m", File: bytes.NewReader(audio), FileName: "clip.wav"},
 			map[string]string{"model": "m", "response_format": "json"},
 		},
 		{
 			"language and prompt",
-			client.TranscriptionRequest{Model: "m", File: bytes.NewReader(audio), FileName: "clip.wav",
+			&client.TranscriptionRequest{Model: "m", File: bytes.NewReader(audio), FileName: "clip.wav",
 				Language: "en", Prompt: "Transcribe the code as digits."},
 			map[string]string{"model": "m", "response_format": "json", "language": "en",
 				"prompt": "Transcribe the code as digits."},
+		},
+		{
+			// language and prompt are Native's to send when the typed fields leave them unset.
+			"native fields",
+			&client.TranscriptionRequest{Model: "m", File: bytes.NewReader(audio), FileName: "clip.wav",
+				Native: url.Values{"temperature": {"0"}, "language": {"en"}, "prompt": {"Digits."}}},
+			map[string]string{"model": "m", "response_format": "json", "temperature": "0", "language": "en",
+				"prompt": "Digits."},
 		},
 	}
 	for _, tc := range cases {
@@ -145,10 +153,51 @@ func TestTranscribeWireRequest(t *testing.T) {
 	}
 }
 
+// TestTranscribeNativeFieldOrder covers the order the form's fields go in: the typed fields,
+// then Native's keys sorted and each key's values in order, a key of several values sent once
+// per value, then the file.
+func TestTranscribeNativeFieldOrder(t *testing.T) {
+	srv := clienttest.NewServer(t, http.StatusOK, transcribeReply)
+	c := newClient(t, client.Config{BaseURL: srv.URL})
+	_, err := c.Transcribe(t.Context(), &client.TranscriptionRequest{
+		Model: "m", File: strings.NewReader("RIFF"), FileName: "clip.wav", Language: "en",
+		Native: url.Values{"temperature": {"0"}, "extra": {"b", "a"}, "max_tokens": {"64"}},
+	})
+	if err != nil {
+		t.Fatalf("Transcribe: %v", err)
+	}
+	got := srv.Only(t)
+	_, params, err := mime.ParseMediaType(got.Header.Get("Content-Type"))
+	if err != nil {
+		t.Fatalf("Content-Type: %v", err)
+	}
+	var order []string
+	r := multipart.NewReader(bytes.NewReader(got.Body), params["boundary"])
+	for {
+		p, err := r.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("read form: %v", err)
+		}
+		body, err := io.ReadAll(p)
+		if err != nil {
+			t.Fatalf("read part %q: %v", p.FormName(), err)
+		}
+		order = append(order, p.FormName()+"="+string(body))
+	}
+	want := []string{"model=m", "response_format=json", "language=en", "extra=b", "extra=a", "max_tokens=64",
+		"temperature=0", "file=RIFF"}
+	if !slices.Equal(order, want) {
+		t.Errorf("form = %q\nwant   %q", order, want)
+	}
+}
+
 func TestTranscribeDecodesReply(t *testing.T) {
 	srv := clienttest.NewServer(t, http.StatusOK, transcribeReply)
 	c := newClient(t, client.Config{BaseURL: srv.URL})
-	got, err := c.Transcribe(t.Context(), client.TranscriptionRequest{
+	got, err := c.Transcribe(t.Context(), &client.TranscriptionRequest{
 		Model: "m", File: strings.NewReader("RIFF"), FileName: "clip.wav",
 	})
 	if err != nil {
@@ -166,7 +215,7 @@ func TestTranscribeDecodesReply(t *testing.T) {
 func TestTranscribeRefusesReply(t *testing.T) {
 	srv := clienttest.NewServer(t, http.StatusOK, `{"text":7429}`)
 	c := newClient(t, client.Config{BaseURL: srv.URL})
-	got, err := c.Transcribe(t.Context(), client.TranscriptionRequest{
+	got, err := c.Transcribe(t.Context(), &client.TranscriptionRequest{
 		Model: "m", File: strings.NewReader("RIFF"), FileName: "clip.wav",
 	})
 	if err == nil || !strings.Contains(err.Error(), "decode response") {
@@ -178,14 +227,25 @@ func TestTranscribeRefusesReply(t *testing.T) {
 // is called or anything is sent.
 func TestTranscribeRefusesRequest(t *testing.T) {
 	file := strings.NewReader("RIFF")
+	native := func(key string) *client.TranscriptionRequest {
+		return &client.TranscriptionRequest{Model: "m", File: file, FileName: "clip.wav", Language: "en",
+			Prompt: "Digits.", Native: url.Values{"temperature": {"0"}, key: {"x"}}}
+	}
 	cases := []struct {
 		name string
-		req  client.TranscriptionRequest
+		req  *client.TranscriptionRequest
 		want string
 	}{
-		{"no model", client.TranscriptionRequest{File: file, FileName: "clip.wav"}, "no model"},
-		{"no file", client.TranscriptionRequest{Model: "m", FileName: "clip.wav"}, "no file"},
-		{"no file name", client.TranscriptionRequest{Model: "m", File: file}, "no file name"},
+		{"nil", nil, "no request"},
+		{"no model", &client.TranscriptionRequest{File: file, FileName: "clip.wav"}, "no model"},
+		{"no file", &client.TranscriptionRequest{Model: "m", FileName: "clip.wav"}, "no file"},
+		{"no file name", &client.TranscriptionRequest{Model: "m", File: file}, "no file name"},
+		{"native field of no name", native(""), "native field has an empty name"},
+		{"native model", native("model"), "native field model clashes"},
+		{"native response_format", native("response_format"), "native field response_format clashes"},
+		{"native file", native("file"), "native field file clashes"},
+		{"native language when set", native("language"), "native field language clashes"},
+		{"native prompt when set", native("prompt"), "native field prompt clashes"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -219,7 +279,7 @@ func TestTranscribeAPIError(t *testing.T) {
 		`"type":"invalid_request_error"}}`
 	srv := clienttest.NewServer(t, http.StatusBadRequest, reply)
 	c := newClient(t, client.Config{BaseURL: srv.URL})
-	got, err := c.Transcribe(t.Context(), client.TranscriptionRequest{
+	got, err := c.Transcribe(t.Context(), &client.TranscriptionRequest{
 		Model: "m", File: strings.NewReader("RIFF"), FileName: "clip.wav",
 	})
 	apiErr, ok := errors.AsType[*client.APIError](err)
@@ -240,7 +300,7 @@ func TestTranscribeTokenErrorSendsNothing(t *testing.T) {
 		BaseURL: srv.URL,
 		Token:   func(context.Context) (string, error) { return "", errExpired },
 	})
-	_, err := c.Transcribe(t.Context(), client.TranscriptionRequest{
+	_, err := c.Transcribe(t.Context(), &client.TranscriptionRequest{
 		Model: "m", File: bytes.NewReader(clip(64 << 10)), FileName: "clip.wav",
 	})
 	if !errors.Is(err, errExpired) {
@@ -272,7 +332,7 @@ func TestTranscribeReaderError(t *testing.T) {
 	base, _ := drainServer(t)
 	c := newClient(t, client.Config{BaseURL: base})
 	errBroken := errors.New("disk read failed")
-	got, err := c.Transcribe(t.Context(), client.TranscriptionRequest{
+	got, err := c.Transcribe(t.Context(), &client.TranscriptionRequest{
 		Model:    "m",
 		File:     io.MultiReader(bytes.NewReader(clip(64<<10)), iotest.ErrReader(errBroken)),
 		FileName: "clip.wav",
@@ -325,7 +385,7 @@ func TestTranscribeCancelMidUpload(t *testing.T) {
 	}
 	done := make(chan result, 1)
 	go func() {
-		got, err := c.Transcribe(ctx, client.TranscriptionRequest{Model: "m", File: file, FileName: "clip.wav"})
+		got, err := c.Transcribe(ctx, &client.TranscriptionRequest{Model: "m", File: file, FileName: "clip.wav"})
 		done <- result{got, err, file.ended.Load()}
 	}()
 	select {

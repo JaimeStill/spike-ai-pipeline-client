@@ -18,7 +18,8 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
   reasoning, and text configuration; `Request.Validate` refuses one the spec's rules don't
   allow. A `Response` carries the output items, status, `IncompleteDetails`, and `Usage`. A
   request's `Native` raw-JSON object, the native tier, is merged into the wire body's top level,
-  and a member that clashes with a typed field is refused.
+  and a member that clashes with a typed field is refused when the format encodes the request,
+  before anything is sent.
 - The `Message` item, content parts from a `Role` (user, system, developer, or assistant):
   `InputText`, `InputImage` (an image URL, remote or data, with an `ImageDetail`; `DataURL`
   builds a base64 data URL from bytes and a media type), and on output `OutputText` and
@@ -55,14 +56,16 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 - `Client.Generate`, which validates a `protocol.Request`, sends it in the Client's format, and
   returns the `protocol.Response`.
 - `Client.Embed`, beside the protocol on the OpenAI-compatible `embeddings` route whatever the
-  format: an `EmbeddingRequest` (model, one or more inputs, and a `Native` object) returns
+  format: an `*EmbeddingRequest` (model, one or more inputs, and a `Native` object) returns
   `Embeddings`, one `[]float32` per input in input order, and `EmbeddingUsage`. The vectors
   travel as base64 of little-endian float32.
 - `Client.Transcribe`, beside the protocol on the OpenAI-compatible `audio/transcriptions`
-  route: a `TranscriptionRequest` (model, the clip as an `io.Reader` with its file name, and an
-  optional language and prompt) returns a `Transcription`, the text and `TranscriptionUsage`.
-  The clip streams as a chunked multipart upload, never held whole in memory, and `Transcribe`
-  returns only once it has stopped reading it. The reply carries no timestamps.
+  route: a `*TranscriptionRequest` (model, the clip as an `io.Reader` with its file name, an
+  optional language and prompt, and a `Native` `url.Values`, the native tier, sent as extra form
+  fields, a field that clashes with a typed one refused) returns a `Transcription`, the text and
+  `TranscriptionUsage`. The clip streams as a chunked multipart upload, never held whole in
+  memory, and `Transcribe` returns only once it has stopped reading it. The reply carries no
+  timestamps.
 
 [Unreleased]: https://github.com/JaimeStill/spike-ai-pipeline-client/compare/v0.1.0...HEAD
 [v0.1.0]: https://github.com/JaimeStill/spike-ai-pipeline-client/releases/tag/v0.1.0

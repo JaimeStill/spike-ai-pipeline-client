@@ -53,13 +53,17 @@ type EmbeddingUsage struct {
 }
 
 // Embed sends req to the endpoint's embeddings route and returns one vector per input, in input
-// order. It refuses a request with no model, no input, or a Native that isn't a JSON object with
-// unique member names before the token source is called or anything is sent. The vectors travel
-// as base64 of little-endian float32 (encoding_format "base64"), and each reply item's index
-// places its vector; a reply whose items don't match the inputs one to one, or whose vector
-// isn't whole float32s, is an error. A non-2xx reply is an *APIError with the OpenAI-style error
-// body's details; a transport failure or a cancelled ctx is returned wrapped.
-func (c *Client) Embed(ctx context.Context, req EmbeddingRequest) (*Embeddings, error) {
+// order. It refuses a nil request, one with no model or no input, and a Native that isn't a JSON
+// object with unique member names or that clashes, before the token source is called or anything
+// is sent. The vectors travel as base64 of little-endian float32 (encoding_format "base64"), and
+// each reply item's index places its vector; a reply whose items don't match the inputs one to
+// one, or whose vector isn't whole float32s, is an error. A non-2xx reply is an *APIError with
+// the OpenAI-style error body's details; a transport failure or a cancelled ctx is returned
+// wrapped.
+func (c *Client) Embed(ctx context.Context, req *EmbeddingRequest) (*Embeddings, error) {
+	if req == nil {
+		return nil, errors.New("client: embed: no request")
+	}
 	body, err := encodeEmbeddingRequest(req)
 	if err != nil {
 		return nil, fmt.Errorf("client: embed: %w", err)
@@ -76,7 +80,7 @@ func (c *Client) Embed(ctx context.Context, req EmbeddingRequest) (*Embeddings, 
 }
 
 // encodeEmbeddingRequest validates req and encodes it as the embeddings request body.
-func encodeEmbeddingRequest(req EmbeddingRequest) ([]byte, error) {
+func encodeEmbeddingRequest(req *EmbeddingRequest) ([]byte, error) {
 	switch {
 	case req.Model == "":
 		return nil, errors.New("request has no model")

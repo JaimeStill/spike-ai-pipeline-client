@@ -84,6 +84,10 @@ const (
 //   - a json_schema format with no name, a name the spec doesn't allow, or a schema that isn't
 //     a JSON object
 //   - a Native that isn't a JSON object with unique member names
+//
+// It doesn't check whether a Native member clashes with a member the typed fields set: only a
+// format knows its wire names, so a clash is refused when the format encodes the request, which
+// is still before anything is sent.
 func (r *Request) Validate() error {
 	if err := r.validate(); err != nil {
 		return fmt.Errorf("protocol: %w", err)

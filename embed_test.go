@@ -34,8 +34,8 @@ const embedReply = `{"object":"list","model":"m","usage":{"prompt_tokens":6,"tot
 	`{"object":"embedding","index":1,"embedding":"` + vecB + `"}]}`
 
 // two is a valid request of two inputs.
-func two() client.EmbeddingRequest {
-	return client.EmbeddingRequest{Model: "m", Input: []string{"a", "b"}}
+func two() *client.EmbeddingRequest {
+	return &client.EmbeddingRequest{Model: "m", Input: []string{"a", "b"}}
 }
 
 func TestEmbedWireRequest(t *testing.T) {
@@ -45,7 +45,7 @@ func TestEmbedWireRequest(t *testing.T) {
 		Query:   url.Values{"autoload": {"false"}},
 		Token:   func(context.Context) (string, error) { return "secret", nil },
 	})
-	if _, err := c.Embed(t.Context(), client.EmbeddingRequest{Model: "m", Input: []string{"a", ""}}); err != nil {
+	if _, err := c.Embed(t.Context(), &client.EmbeddingRequest{Model: "m", Input: []string{"a", ""}}); err != nil {
 		t.Fatalf("Embed: %v", err)
 	}
 	got := srv.Only(t)
@@ -149,16 +149,17 @@ func TestEmbedRefusesReply(t *testing.T) {
 func TestEmbedRefusesRequest(t *testing.T) {
 	cases := []struct {
 		name string
-		req  client.EmbeddingRequest
+		req  *client.EmbeddingRequest
 		want string
 	}{
-		{"no model", client.EmbeddingRequest{Input: []string{"a"}}, "no model"},
-		{"no input", client.EmbeddingRequest{Model: "m"}, "no input"},
-		{"native not an object", client.EmbeddingRequest{Model: "m", Input: []string{"a"}, Native: []byte(`[1]`)},
+		{"nil", nil, "no request"},
+		{"no model", &client.EmbeddingRequest{Input: []string{"a"}}, "no model"},
+		{"no input", &client.EmbeddingRequest{Model: "m"}, "no input"},
+		{"native not an object", &client.EmbeddingRequest{Model: "m", Input: []string{"a"}, Native: []byte(`[1]`)},
 			"isn't a JSON object"},
-		{"native with a repeated member", client.EmbeddingRequest{Model: "m", Input: []string{"a"},
+		{"native with a repeated member", &client.EmbeddingRequest{Model: "m", Input: []string{"a"},
 			Native: []byte(`{"user":"a","user":"b"}`)}, "isn't a JSON object with unique member names"},
-		{"native clash", client.EmbeddingRequest{Model: "m", Input: []string{"a"},
+		{"native clash", &client.EmbeddingRequest{Model: "m", Input: []string{"a"},
 			Native: []byte(`{"encoding_format":"float"}`)}, "native member encoding_format clashes"},
 	}
 	for _, tc := range cases {
