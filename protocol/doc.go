@@ -13,13 +13,13 @@
 // A streamed response arrives as the spec's streaming events, the [Event] set, and an
 // [Accumulator] folds them into the Response an unstreamed request returns. The subset is the
 // state events response.created and the terminal response.completed, response.incomplete, and
-// response.failed; the error event, error, which response.failed follows; the item events response.output_item.added and .done; the part events
-// response.content_part.added and .done; the text events response.output_text.delta and .done,
-// response.refusal.delta and .done, and response.reasoning.delta and .done, the last of a
-// Reasoning item's reasoning_text part; and the argument events
-// response.function_call_arguments.delta and .done. It leaves out response.queued and
-// response.in_progress, reasoning summary events, output_text annotations, logprobs, and the
-// deltas' obfuscation padding.
+// response.failed; the error event, error, which response.failed follows; the item events
+// response.output_item.added and .done; the part events response.content_part.added and .done;
+// the text events response.output_text.delta and .done, response.refusal.delta and .done, and
+// response.reasoning.delta and .done, the last of a Reasoning item's reasoning_text part; and the
+// argument events response.function_call_arguments.delta and .done. It leaves out
+// response.queued and response.in_progress, reasoning summary events, output_text annotations,
+// logprobs, and the deltas' obfuscation padding.
 //
 // # Client extensions
 //

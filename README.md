@@ -9,8 +9,8 @@ format below it, Chat Completions (`format/completions`) first, then Anthropic M
 Responses; and the module root, the transport, which speaks the format chosen by constructor at
 the composition root.
 
-It has three operations: `Generate`, chat with text, image, and audio parts, tools, structured
-output, and reasoning; `Embed`; and `Transcribe`.
+It has four operations: `Generate`, chat with text, image, and audio parts, tools, structured
+output, and reasoning; `GenerateStream`, the same request streamed; `Embed`; and `Transcribe`.
 
 ```go
 c, err := client.New(client.Config{
@@ -29,6 +29,33 @@ resp, err := c.Generate(ctx, &protocol.Request{
 	}},
 })
 ```
+
+`GenerateStream` yields the response as Open Responses' streaming events, read from the
+endpoint's server-sent events as they arrive, in a lazy `iter.Seq2` that sends the request when it
+is ranged. A `protocol.Accumulator` folds the events, in the caller's loop, into the Response
+`Generate` would return; after a stream that breaks or is cancelled, it holds the partial output.
+
+```go
+var acc protocol.Accumulator
+for event, err := range c.GenerateStream(ctx, req) {
+	if err != nil {
+		return err // acc.Response() holds the output so far, in progress
+	}
+	if d, ok := event.(protocol.OutputTextDelta); ok {
+		fmt.Print(d.Delta)
+	}
+	if err := acc.Add(event); err != nil {
+		return err
+	}
+}
+resp := acc.Response()
+```
+
+The library sets no timeout, retry, or limit unless the caller does. Timeouts are the context's
+and the caller's transport's. Retry is opt-in: `Config.Retry`, a `RetryPolicy` of the most
+attempts and the backoff's base and most delays, sends a request again on a 408, 429, or 503
+reply, or a connection failure before any reply, honoring Retry-After, and never retries another
+status, a started stream, or `Transcribe`.
 
 The package documentation is the API reference. The module is released by tag, `vX.Y.Z`, with a
 CHANGELOG, and spike-ai-pipeline-processing and the root build on it by tag.

@@ -6,6 +6,85 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 
 ## [Unreleased]
 
+## [v0.2.0] - 2026-10-27
+
+### Added
+
+- `Client.GenerateStream`, which streams a `protocol.Request`'s response as Open Responses'
+  streaming events (spec 2026-04-24) over server-sent events, decoded to the WHATWG standard on
+  the standard library alone. It returns a lazy `iter.Seq2[protocol.Event, error]`: nothing is
+  validated, encoded, or sent until it is ranged, each range sends a new request, the events are
+  read as they arrive inside the range loop with no goroutine, and breaking out of the loop
+  closes the body. A refused request, a token source error, a transport failure, or a non-2xx
+  reply (the same `*APIError` as `Generate`) is the sequence's only pair. A stream that breaks
+  ends with one error pair: a cancelled or expired context's error, wrapped, or
+  `io.ErrUnexpectedEOF` for a stream that ends before its terminal event or a read that fails.
+  Cancelling closes the connection, which stops the generation.
+- `protocol.Event`, a closed set of the spec's streaming events under the spec's names, each with
+  its `sequence_number` and, where the spec gives them, `output_index`, `content_index`, and
+  `item_id`: `ResponseCreated` and the terminal `ResponseCompleted`, `ResponseIncomplete`, and
+  `ResponseFailed`; `ErrorEvent`, the error event, which `response.failed` follows, carrying an
+  `ErrorPayload` (type, code, message, and param); `OutputItemAdded` and `OutputItemDone`;
+  `ContentPartAdded` and `ContentPartDone`; `OutputTextDelta` and `OutputTextDone`,
+  `RefusalDelta` and `RefusalDone`, and `ReasoningDelta` and `ReasoningDone`; and
+  `FunctionCallArgumentsDelta` and `FunctionCallArgumentsDone`. Reasoning summary events,
+  output_text annotations, logprobs, and the deltas' obfuscation padding are outside the subset.
+- `protocol.Accumulator`, which folds a stream's events in the caller's own loop: `Add` takes
+  each event and refuses one that doesn't follow the events before it, changing nothing, and
+  `Response` returns the Response folded so far. After the terminal event it is that event's
+  Response, the Response `Generate` decodes for the same reply; after a broken stream it holds
+  the partial output, in progress.
+- `protocol.StatusInProgress` and `protocol.StatusFailed`, the spec's in_progress and failed.
+- `Response.Error`, a `*protocol.ResponseError` (code and message), the spec's error of a failed
+  response. A failure the server reports mid-stream, such as llama.cpp's error frame, ends the
+  stream with an `ErrorEvent` and then `ResponseFailed`, whose Response is failed, holds the
+  error, and holds the output made before it.
+- `format.StreamDecoder`, which turns one streamed reply's events into the protocol's, a new one
+  per stream so a Format stays safe for concurrent use, and the `format.Format` methods
+  `EncodeStreamRequest` and `NewStreamDecoder`.
+- Streaming in `format/completions`: the streamed request sends `stream` true and
+  `stream_options.include_usage` true, so the terminal Response carries usage. Its stream
+  decoder turns chunks into the spec's events in v0.1.0's output order (reasoning, message,
+  function calls), each item opened by `output_item.added`, its parts by `content_part.added`,
+  closed by their deltas' done events, `content_part.done`, and `output_item.done` with the
+  whole item, the reasoning item's carrying the same `encrypted_content` envelope
+  `DecodeResponse` makes, so the folded output goes back as input as it came. Tool-call
+  fragments are assembled by their index. `data: [DONE]` ends the stream, as does the stream's
+  end after a `finish_reason`; ping comments are ignored.
+- `Config.Retry`, a `*RetryPolicy` (`MaxAttempts`, `BaseDelay`, `MaxDelay`), opt-in: nil, the
+  default, retries nothing, and `New` refuses fewer than one attempt, a negative delay, or a base
+  delay above the most delay. With a policy, `Generate`, `Embed`, and `GenerateStream` before
+  its 2xx reply arrives send a request again on a 408, 429, or 503 reply, or a connection
+  failure before any reply, calling the token source again and sending the same body, after an
+  exponential backoff with full jitter capped at `MaxDelay`. A `Retry-After`, in seconds or as
+  an HTTP date, replaces the backoff; one longer than `MaxDelay`, or a wait past the context's
+  deadline, returns the last error at once, and a context cancelled while waiting returns its
+  error. Never retried: a 500 or any other status, a context error, a token source error, a
+  stream once started, and `Transcribe`, whose clip is a one-shot reader.
+
+### Changed
+
+- **Breaking:** `format.Format` gains the required methods `EncodeStreamRequest` and
+  `NewStreamDecoder`. A format written outside the module must add them.
+- `format/completions` derives each output item's id from the reply's id and its output index,
+  `<reply id>/<output index>`, such as `chatcmpl-abc/1`; v0.1.0 left `Message.ID`,
+  `FunctionCall.ID`, and `Reasoning.ID` empty. A reply with no id still gives its items none.
+- Per-item status follows the spec: only the last output item takes the response's status, and
+  the items before it are completed. v0.1.0 gave every message and function call the
+  response's status, so a reply cut off by length or a content filter had every item
+  incomplete.
+- `protocol.Reasoning` gains `Status`, as the spec's required item fields have every item carry
+  one, ignored on input as `Message`'s and `FunctionCall`'s are; `DecodeResponse` sets it where
+  v0.1.0 left it empty.
+- The Chat Completions request always sends `stream` as a typed field, false unstreamed and true
+  streamed, so a `Native` `stream` or `stream_options` member is refused as a clash before
+  anything is sent. v0.1.0 sent a `Native` `"stream": true` and then couldn't decode the reply.
+- `protocol.ReasoningText` is a `ContentPart`, as the spec's content part events carry it;
+  `Request.Validate` still refuses it in a message.
+- `Config.HTTP`'s documentation names the timeouts to use with a stream: the context, or the
+  transport's `ResponseHeaderTimeout`, never `http.Client.Timeout`, which ends a long stream part
+  way.
+
 ## [v0.1.0] - 2026-10-27
 
 ### Added
@@ -67,5 +146,6 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
   memory, and `Transcribe` returns only once it has stopped reading it. The reply carries no
   timestamps.
 
-[Unreleased]: https://github.com/JaimeStill/spike-ai-pipeline-client/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/JaimeStill/spike-ai-pipeline-client/compare/v0.2.0...HEAD
+[v0.2.0]: https://github.com/JaimeStill/spike-ai-pipeline-client/compare/v0.1.0...v0.2.0
 [v0.1.0]: https://github.com/JaimeStill/spike-ai-pipeline-client/releases/tag/v0.1.0
