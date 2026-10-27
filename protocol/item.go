@@ -16,7 +16,10 @@ type Item interface {
 // and InputAudio parts; system and developer messages hold InputText parts, as the spec allows
 // them no other; assistant messages hold OutputText and Refusal parts.
 type Message struct {
-	// ID is the item's id, when the format supplies one. Chat Completions doesn't.
+	// ID is the item's id in a response's output, which the spec requires there and the
+	// streaming events carry as their item id. A format whose API supplies none derives it, as
+	// completions does from the reply's id and the item's output index; it is empty when the
+	// format has nothing to derive it from.
 	ID string
 	// Status is the item's status in a response's output, when the format supplies one. It is
 	// ignored on input.
@@ -44,8 +47,9 @@ const (
 	RoleAssistant Role = "assistant"
 )
 
-// ContentPart is one part of a message's content. The set is closed: the part types are this
-// package's, and a part is one of them by value, such as InputText.
+// ContentPart is one part of an item's content: of a message's, or ReasoningText, of a reasoning
+// item's, which the spec's content part events carry beside a message's parts. The set is closed:
+// the part types are this package's, and a part is one of them by value, such as InputText.
 type ContentPart interface {
 	contentPart()
 }
@@ -133,7 +137,10 @@ func (Refusal) contentPart() {}
 // declared. It comes back in a response's Output, and goes back in the next request's Input,
 // ahead of the FunctionCallOutput that answers it.
 type FunctionCall struct {
-	// ID is the item's id, when the format supplies one. Chat Completions doesn't.
+	// ID is the item's id in a response's output, which the spec requires there and the
+	// streaming events carry as their item id. A format whose API supplies none derives it, as
+	// completions does from the reply's id and the item's output index; it is empty when the
+	// format has nothing to derive it from.
 	ID string
 	// Status is the item's status in a response's output, when the format supplies one. It is
 	// ignored on input.
@@ -185,10 +192,18 @@ func (FunctionCallOutput) item() {}
 // caller carries it back unchanged. A format reading another format's EncryptedContent drops
 // the item rather than send it.
 //
-// The spec gives the reasoning item no status, so Reasoning has none.
+// Reasoning has a Status, as every other output item does. The spec's reference schema for the
+// reasoning item omits status, but its normative rule for items requires id, type, and status on
+// every item, and its own reasoning example carries one; the client follows the rule.
 type Reasoning struct {
-	// ID is the item's id, when the format supplies one. Chat Completions doesn't.
+	// ID is the item's id in a response's output, which the spec requires there and the
+	// streaming events carry as their item id. A format whose API supplies none derives it, as
+	// completions does from the reply's id and the item's output index; it is empty when the
+	// format has nothing to derive it from.
 	ID string
+	// Status is the item's status in a response's output, when the format supplies one. It is
+	// ignored on input.
+	Status Status
 	// Content is the reasoning the model produced, as reasoning_text parts, when the format
 	// supplies it. It is output only: on input it is ignored and never sent.
 	Content []ReasoningText
@@ -203,11 +218,14 @@ type Reasoning struct {
 func (Reasoning) item() {}
 
 // ReasoningText is reasoning the model produced: reasoning_text, a part of a Reasoning item's
-// Content. It is held there alone, so it isn't a ContentPart.
+// Content. It is a ContentPart so the content part events of a streamed reasoning item can carry
+// it, as the spec's do, but a message never holds it: Validate refuses it there.
 type ReasoningText struct {
 	// Text is the reasoning.
 	Text string
 }
+
+func (ReasoningText) contentPart() {}
 
 // SummaryText is a summary of the model's reasoning: summary_text, a part of a Reasoning
 // item's Summary. It is held there alone, so it isn't a ContentPart.
@@ -219,11 +237,17 @@ type SummaryText struct {
 // Status is the status of a response or of an item in its output.
 type Status string
 
-// The statuses a stateless response and its items take.
+// The statuses a stateless response and its items take, under the spec's names.
 const (
+	// StatusInProgress is a response or item the model is still producing: one a stream has
+	// begun and not finished.
+	StatusInProgress Status = "in_progress"
 	// StatusCompleted is a response or item the model finished.
 	StatusCompleted Status = "completed"
 	// StatusIncomplete is a response or item the model stopped before finishing; a response's
 	// IncompleteDetails says why.
 	StatusIncomplete Status = "incomplete"
+	// StatusFailed is a response that failed before the model finished it, as a stream's
+	// terminal response.failed carries it.
+	StatusFailed Status = "failed"
 )

@@ -1,7 +1,6 @@
 package client
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -9,13 +8,15 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/JaimeStill/spike-ai-pipeline-client/format"
 	"github.com/JaimeStill/spike-ai-pipeline-client/protocol"
 )
 
-// TokenSource returns the bearer token for one request. The Client calls it once per request, so
-// a source whose tokens expire can refresh them. An empty token sends no Authorization header.
+// TokenSource returns the bearer token for one request. The Client calls it once per request, and
+// again for each attempt a RetryPolicy makes, so a source whose tokens expire can refresh them.
+// An empty token sends no Authorization header.
 type TokenSource func(ctx context.Context) (string, error)
 
 // Config describes the endpoint a Client talks to and the format it speaks there.
@@ -30,11 +31,18 @@ type Config struct {
 	// Token authenticates each request as a bearer token. Nil sends no Authorization header.
 	Token TokenSource
 	// HTTP sends the requests. It is required, and its transport and timeouts are the Client's:
-	// the library sets no timeout, retry, or limit of its own.
+	// the library sets no timeout or limit of its own. A timeout is the caller's, set by the
+	// context, or by the transport's ResponseHeaderTimeout, which bounds the wait for a reply
+	// without cutting off a stream; http.Client.Timeout, which bounds the whole exchange, ends a
+	// long stream part way.
 	HTTP *http.Client
 	// Format is the wire format Generate speaks, chosen by its constructor, such as
 	// completions.New(). It is required.
 	Format format.Format
+	// Retry is the policy for sending a request again when the endpoint may answer it later, as
+	// RetryPolicy describes. Nil, the default, retries nothing. New copies it, so changing the
+	// policy after New doesn't change the Client.
+	Retry *RetryPolicy
 }
 
 // Client makes requests of one endpoint in one wire format. It is safe for concurrent use when
@@ -45,11 +53,16 @@ type Client struct {
 	token  TokenSource
 	http   *http.Client
 	format format.Format
+	// retry is the Config's policy, its zero value retrying nothing.
+	retry RetryPolicy
+	// jitter is the backoff's jitter source, fullJitter outside the tests.
+	jitter func(time.Duration) time.Duration
 }
 
 // New returns a Client for cfg. It makes no request, so it reports only a Config that can't
-// describe an endpoint: no HTTP client, no Format, or a BaseURL that isn't an absolute http or
-// https URL without a query or fragment.
+// describe an endpoint: no HTTP client, no Format, a BaseURL that isn't an absolute http or
+// https URL without a query or fragment, or a Retry policy with fewer than one attempt, a
+// negative delay, or a base delay above its most delay.
 func New(cfg Config) (*Client, error) {
 	if cfg.HTTP == nil {
 		return nil, errors.New("client: config has no HTTP client")
@@ -74,6 +87,13 @@ func New(cfg Config) (*Client, error) {
 	case u.Fragment != "" || u.RawFragment != "":
 		return nil, fmt.Errorf("client: base URL %q has a fragment", cfg.BaseURL)
 	}
+	var retry RetryPolicy
+	if cfg.Retry != nil {
+		if err := cfg.Retry.check(); err != nil {
+			return nil, err
+		}
+		retry = *cfg.Retry
+	}
 	// The query is encoded once, here, so a caller changing its url.Values after New can't
 	// change the requests.
 	return &Client{
@@ -82,13 +102,16 @@ func New(cfg Config) (*Client, error) {
 		token:  cfg.Token,
 		http:   cfg.HTTP,
 		format: cfg.Format,
+		retry:  retry,
+		jitter: fullJitter,
 	}, nil
 }
 
 // Generate sends req in the Client's format and returns the model's response. It validates req
 // with its Validate method, and the format encodes it, before the token source is called or
 // anything is sent. A non-2xx reply is an *APIError; a transport failure or a cancelled ctx is
-// returned wrapped.
+// returned wrapped. With a Config.Retry policy, a reply or failure the policy retries is sent
+// again, and the last attempt's error is returned as it would be without one.
 func (c *Client) Generate(ctx context.Context, req *protocol.Request) (*protocol.Response, error) {
 	if err := req.Validate(); err != nil {
 		return nil, fmt.Errorf("client: generate: %w", err)
@@ -98,7 +121,7 @@ func (c *Client) Generate(ctx context.Context, req *protocol.Request) (*protocol
 	if err != nil {
 		return nil, fmt.Errorf("client: generate: %w", err)
 	}
-	reply, err := c.post(ctx, c.format.Route(), header, bytes.NewReader(body), "application/json", c.format.DecodeError)
+	reply, err := c.post(ctx, c.format.Route(), header, body, c.format.DecodeError)
 	if err != nil {
 		return nil, fmt.Errorf("client: generate: %w", err)
 	}
@@ -117,13 +140,46 @@ func (c *Client) endpoint(route string) string {
 	return u.String()
 }
 
-// post sends body as a POST of contentType to route, with header and the bearer token, and
-// returns the reply's body. The token source is called before the request is made, so a source
-// error sends nothing. A body of unknown length, such as a pipe, goes chunked. A non-2xx reply is
-// an *APIError, its details decoded by decodeError: the Client's format's for Generate, and the
-// OpenAI-style decoder for the operations outside the Format.
-func (c *Client) post(ctx context.Context, route string, header http.Header, body io.Reader, contentType string,
+// post sends body as a JSON POST to route, with header and the bearer token, and returns the
+// reply's body, as send describes: retried as the Client's policy has it.
+func (c *Client) post(ctx context.Context, route string, header http.Header, body []byte,
 	decodeError func(body []byte) (message, typ, code string)) ([]byte, error) {
+	resp, err := c.send(ctx, route, header, body, "application/json", "application/json", decodeError)
+	if err != nil {
+		return nil, err
+	}
+	return readReply(resp)
+}
+
+// readReply reads and closes the body of a 2xx reply.
+func readReply(resp *http.Response) ([]byte, error) {
+	defer func() { _ = resp.Body.Close() }()
+	reply, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+	return reply, nil
+}
+
+// attempt sends body once, as request builds it and do sends it, and returns do's reply. It is
+// the one-attempt path, for an operation that is never sent again.
+func (c *Client) attempt(ctx context.Context, route string, header http.Header, body io.Reader, contentType, accept string,
+	decodeError func(body []byte) (message, typ, code string)) (*http.Response, error) {
+	req, err := c.request(ctx, route, header, body, contentType, accept)
+	if err != nil {
+		return nil, err
+	}
+	resp, _, err := c.do(req, decodeError)
+	return resp, err
+}
+
+// request builds one attempt's POST of body, of contentType, to route, accepting accept, with
+// header and the bearer token. The token source is called here, before the request exists, so
+// a source error sends nothing. A body of unknown length, such as a pipe, goes chunked. Its
+// errors are every way an attempt fails before anything is sent, which is why it is apart from
+// do: send returns them at once, never classifying them for a retry, so a token source that
+// fails on its own network call isn't mistaken for the endpoint's connection failing.
+func (c *Client) request(ctx context.Context, route string, header http.Header, body io.Reader, contentType, accept string) (*http.Request, error) {
 	token := ""
 	if c.token != nil {
 		t, err := c.token(ctx)
@@ -138,25 +194,31 @@ func (c *Client) post(ctx context.Context, route string, header http.Header, bod
 	}
 	maps.Copy(req.Header, header)
 	req.Header.Set("Content-Type", contentType)
-	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept", accept)
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
+	return req, nil
+}
+
+// do sends req and returns a 2xx reply, its body unread, for the caller to read and close. A
+// non-2xx reply is an *APIError, its body read and closed and its details decoded by
+// decodeError: the Client's format's for Generate and GenerateStream, and the OpenAI-style
+// decoder for the operations outside the Format. Its Retry-After header is returned beside it,
+// for send's wait.
+func (c *Client) do(req *http.Request, decodeError func(body []byte) (message, typ, code string)) (*http.Response, string, error) {
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	defer func() { _ = resp.Body.Close() }()
-	reply, err := io.ReadAll(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		defer func() { _ = resp.Body.Close() }()
 		// A failed read leaves the part of the body that was read, which is still the best
 		// account of the error there is.
+		reply, _ := io.ReadAll(resp.Body)
 		e := &APIError{Status: resp.StatusCode, Body: reply}
 		e.Message, e.Type, e.Code = decodeError(reply)
-		return nil, e
+		return nil, resp.Header.Get("Retry-After"), e
 	}
-	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
-	}
-	return reply, nil
+	return resp, "", nil
 }

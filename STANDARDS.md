@@ -17,7 +17,8 @@ The architecture pages that apply, in the architecture repository:
 
 ## The client
 
-- The library ships no policy: timeouts, retries, and limits are the caller's values.
+- The library sets no timeout, retry, or limit unless the caller does; retry is opt-in, a policy
+  the caller sets in Config.
 - A wire format is chosen by typed constructor at the composition root, never from a registry.
 - A native engine parameter goes through the request's raw-JSON extension field, documented as
   native tier, never as a typed field of the standard model.

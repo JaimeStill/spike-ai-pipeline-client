@@ -91,12 +91,13 @@ func TestValidateAccepts(t *testing.T) {
 		{"tool name of 64 characters", with(func(r *protocol.Request) {
 			r.Tools = []protocol.FunctionTool{{Name: strings.Repeat("a", 64)}}
 		})},
-		// Content, which the spec's input reasoning item lacks, is accepted on input and never
-		// sent, so a response's Output goes back as it came.
-		{"reasoning items, content on input included", with(func(r *protocol.Request) {
+		// Content, which the spec's input reasoning item lacks, and Status are accepted on input
+		// and never sent, so a response's Output goes back as it came.
+		{"reasoning items, content and status on input included", with(func(r *protocol.Request) {
 			r.Input = append(r.Input,
 				protocol.Reasoning{
 					ID:               "rs_1",
+					Status:           protocol.StatusCompleted,
 					Content:          []protocol.ReasoningText{{Text: "The user asks."}},
 					Summary:          []protocol.SummaryText{{Text: "Asked."}},
 					EncryptedContent: "opaque",
@@ -175,6 +176,9 @@ func TestValidateRefuses(t *testing.T) {
 		{"input part from assistant", with(func(r *protocol.Request) {
 			r.Input = []protocol.Item{protocol.Message{Role: protocol.RoleAssistant, Content: []protocol.ContentPart{protocol.InputText{Text: "hi"}}}}
 		}), "unsupported part protocol.InputText"},
+		{"reasoning_text in a message", with(func(r *protocol.Request) {
+			r.Input = []protocol.Item{protocol.Message{Role: protocol.RoleAssistant, Content: []protocol.ContentPart{protocol.ReasoningText{Text: "hm"}}}}
+		}), "assistant message content 0: unsupported part protocol.ReasoningText"},
 		{"image from system", with(func(r *protocol.Request) {
 			r.Input = []protocol.Item{protocol.Message{Role: protocol.RoleSystem, Content: []protocol.ContentPart{image}}}
 		}), "system message content 0: unsupported part protocol.InputImage"},

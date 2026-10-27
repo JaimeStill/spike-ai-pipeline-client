@@ -8,6 +8,19 @@
 // The standard tier is the spec's model. The native tier is a Request's Native field, raw JSON
 // merged into the wire body's top level as it is, for what the standard tier doesn't cover.
 //
+// # Streaming
+//
+// A streamed response arrives as the spec's streaming events, the [Event] set, and an
+// [Accumulator] folds them into the Response an unstreamed request returns. The subset is the
+// state events response.created and the terminal response.completed, response.incomplete, and
+// response.failed; the error event, error, which response.failed follows; the item events
+// response.output_item.added and .done; the part events response.content_part.added and .done;
+// the text events response.output_text.delta and .done, response.refusal.delta and .done, and
+// response.reasoning.delta and .done, the last of a Reasoning item's reasoning_text part; and the
+// argument events response.function_call_arguments.delta and .done. It leaves out
+// response.queued and response.in_progress, reasoning summary events, output_text annotations,
+// logprobs, and the deltas' obfuscation padding.
+//
 // # Client extensions
 //
 // A client extension is a feature the spec doesn't yet define, added under the spec's extension
@@ -38,17 +51,19 @@
 //     [ReasoningEffortLow], [ReasoningEffortMedium], [ReasoningEffortHigh], or
 //     [ReasoningEffortXHigh].
 //   - [Request.Validate] refuses a request the model can't describe.
-//   - [Response] is a model's response: output, status, and usage.
+//   - [Response] is a model's response: output, status, error, and usage.
 //   - [IncompleteDetails] says why a response is incomplete.
 //   - [IncompleteReason] is that reason, [ReasonMaxOutputTokens] or [ReasonContentFilter].
+//   - [ResponseError] is the error a failed response holds: code and message.
 //   - [Usage] counts a request's tokens.
 //   - [OutputTokensDetails] breaks the output tokens down.
-//   - [Status] is a response's or item's status, [StatusCompleted] or [StatusIncomplete].
+//   - [Status] is a response's or item's status, [StatusInProgress], [StatusCompleted],
+//     [StatusIncomplete], or [StatusFailed].
 //   - [Item] is one unit of a conversation, carried in Input and Output, a closed set.
 //   - [Message] is a message item: content parts from a role.
 //   - [Role] is a message's author: [RoleUser], [RoleSystem], [RoleDeveloper], or
 //     [RoleAssistant].
-//   - [ContentPart] is a part of a message's content, a closed set.
+//   - [ContentPart] is a part of a message's content, or of a reasoning item's, a closed set.
 //   - [InputText] is text input, input_text.
 //   - [InputImage] is image input, input_image, by URL or data URL.
 //   - [ImageDetail] is an image's detail level: [ImageDetailAuto], [ImageDetailLow], or
@@ -71,4 +86,31 @@
 //     [ToolChoiceNone], or [ToolChoiceRequired].
 //   - [FunctionToolChoice] has the model call one named function.
 //   - [AllowedToolChoice] narrows the tools the model may call to a set, with a mode.
+//   - [Event] is one of a streamed response's events, a closed set.
+//   - [ResponseCreated] is response.created, the event that opens a stream.
+//   - [ResponseCompleted] is response.completed, the terminal event of a finished response.
+//   - [ResponseIncomplete] is response.incomplete, the terminal event of a response the model
+//     stopped early.
+//   - [ResponseFailed] is response.failed, the terminal event of a failed response.
+//   - [ErrorEvent] is error, the server's report that the response failed, ahead of
+//     response.failed.
+//   - [ErrorPayload] is the error an ErrorEvent carries: type, code, message, and param.
+//   - [OutputItemAdded] is response.output_item.added, an output item begun.
+//   - [OutputItemDone] is response.output_item.done, an output item finished, whole.
+//   - [ContentPartAdded] is response.content_part.added, a content part begun.
+//   - [ContentPartDone] is response.content_part.done, a content part finished, whole.
+//   - [OutputTextDelta] is response.output_text.delta, text appended to an output_text part.
+//   - [OutputTextDone] is response.output_text.done, an output_text part's whole text.
+//   - [RefusalDelta] is response.refusal.delta, text appended to a refusal part.
+//   - [RefusalDone] is response.refusal.done, a refusal part's whole text.
+//   - [ReasoningDelta] is response.reasoning.delta, text appended to a reasoning_text part.
+//   - [ReasoningDone] is response.reasoning.done, a reasoning_text part's whole text.
+//   - [FunctionCallArgumentsDelta] is response.function_call_arguments.delta, argument text
+//     appended to a function_call item.
+//   - [FunctionCallArgumentsDone] is response.function_call_arguments.done, a function_call
+//     item's whole arguments.
+//   - [Accumulator] folds a stream's events into the Response they describe.
+//   - [Accumulator.Add] folds the next event, refusing one that doesn't follow the events
+//     before it.
+//   - [Accumulator.Response] returns the Response folded so far.
 package protocol

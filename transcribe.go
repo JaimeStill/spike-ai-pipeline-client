@@ -88,6 +88,10 @@ type TranscriptionUsage struct {
 // A File read error is returned wrapped, ahead of whatever the transport made of the upload it
 // cut short. A transport failure or a cancelled ctx is returned wrapped too. A non-2xx reply is
 // an *APIError with the OpenAI-style error body's details.
+//
+// Transcribe is never retried, whatever Config.Retry says: File is a one-shot reader, uploaded
+// as it is read, so a second attempt would have no clip to send. A caller who can read the clip
+// again retries by calling Transcribe again with a new reader.
 func (c *Client) Transcribe(ctx context.Context, req *TranscriptionRequest) (*Transcription, error) {
 	if req == nil {
 		return nil, errors.New("client: transcribe: no request")
@@ -105,7 +109,14 @@ func (c *Client) Transcribe(ctx context.Context, req *TranscriptionRequest) (*Tr
 		// The writer's error, or EOF on nil, ends the request body's read.
 		pw.CloseWithError(writeTranscriptionForm(form, fields, req.FileName, file))
 	}()
-	reply, err := c.post(ctx, transcriptionsRoute, nil, pr, form.FormDataContentType(), format.DecodeOpenAIError)
+	// One attempt, never retried: the clip is read as it is sent, so there is no second copy
+	// of it to send again.
+	resp, err := c.attempt(ctx, transcriptionsRoute, nil, pr, form.FormDataContentType(), "application/json",
+		format.DecodeOpenAIError)
+	var reply []byte
+	if err == nil {
+		reply, err = readReply(resp)
+	}
 	// A request that ended before reading the whole form leaves the goroutine blocked on the
 	// pipe; closing the read side fails its write, and it ends. After a whole read, this is a
 	// no-op.

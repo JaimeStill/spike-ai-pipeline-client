@@ -35,8 +35,8 @@ func TestReasoningRoundTrip(t *testing.T) {
 	for _, p := range r.Content {
 		reasoning.WriteString(p.Text)
 	}
-	if strings.TrimSpace(reasoning.String()) == "" || r.EncryptedContent == "" {
-		t.Fatalf("reasoning = %#v, want content and encrypted content", r)
+	if strings.TrimSpace(reasoning.String()) == "" || r.EncryptedContent == "" || r.Status != protocol.StatusCompleted {
+		t.Fatalf("reasoning = %#v, want it completed, with content and encrypted content", r)
 	}
 	call := weatherCall(t, resp)
 	t.Logf("reasoning %q; reasoning tokens %d of %d output tokens",
