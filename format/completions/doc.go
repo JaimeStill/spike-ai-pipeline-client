@@ -1,7 +1,8 @@
 // Package completions is the Chat Completions wire format: the adapter that encodes the
 // protocol's request model as an OpenAI-compatible /chat/completions request and decodes the
-// reply into its response model, whole or streamed. It targets /chat/completions, not the legacy /completions
-// API. A caller builds it with New at the composition root, as client.Config's Format.
+// reply into its response model, whole or streamed. It targets /chat/completions, not the legacy
+// /completions API. A caller builds it with New at the composition root, as client.Config's
+// Format.
 //
 // Its exported identifiers:
 //

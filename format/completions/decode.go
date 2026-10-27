@@ -39,9 +39,9 @@ func (*Format) DecodeResponse(body []byte) (*protocol.Response, error) {
 	}
 	choice := wire.Choices[0]
 	resp := &protocol.Response{Usage: decodeUsage(wire.Usage)}
-	var err error
-	if resp.Status, resp.IncompleteDetails, err = decodeFinish(choice.FinishReason); err != nil {
-		return nil, fmt.Errorf("completions: response %w", err)
+	var ok bool
+	if resp.Status, resp.IncompleteDetails, ok = decodeFinish(choice.FinishReason); !ok {
+		return nil, fmt.Errorf("completions: response has unknown finish_reason %q", choice.FinishReason)
 	}
 	if r := choice.Message.ReasoningContent; r != "" {
 		sealed, err := sealEnvelope(envelope{ReasoningContent: r})
@@ -94,17 +94,17 @@ func decodeUsage(u usage) protocol.Usage {
 }
 
 // decodeFinish returns the status, and the incomplete details, that a finish_reason gives, as
-// DecodeResponse describes.
-func decodeFinish(reason string) (protocol.Status, *protocol.IncompleteDetails, error) {
+// DecodeResponse describes, or false for a finish_reason it doesn't know.
+func decodeFinish(reason string) (protocol.Status, *protocol.IncompleteDetails, bool) {
 	switch reason {
 	case "stop", "tool_calls":
-		return protocol.StatusCompleted, nil, nil
+		return protocol.StatusCompleted, nil, true
 	case "length":
-		return protocol.StatusIncomplete, &protocol.IncompleteDetails{Reason: protocol.ReasonMaxOutputTokens}, nil
+		return protocol.StatusIncomplete, &protocol.IncompleteDetails{Reason: protocol.ReasonMaxOutputTokens}, true
 	case "content_filter":
-		return protocol.StatusIncomplete, &protocol.IncompleteDetails{Reason: protocol.ReasonContentFilter}, nil
+		return protocol.StatusIncomplete, &protocol.IncompleteDetails{Reason: protocol.ReasonContentFilter}, true
 	}
-	return "", nil, fmt.Errorf("has unknown finish_reason %q", reason)
+	return "", nil, false
 }
 
 // sealEnvelope returns e in its encrypted_content layout: envelopePrefix, then e as JSON in
@@ -233,9 +233,9 @@ func (d *streamDecoder) decode(data []byte) error {
 			if d.finished {
 				return errors.New("a second finish_reason")
 			}
-			var err error
-			if d.status, d.details, err = decodeFinish(choice.FinishReason); err != nil {
-				return fmt.Errorf("chunk %w", err)
+			var ok bool
+			if d.status, d.details, ok = decodeFinish(choice.FinishReason); !ok {
+				return fmt.Errorf("chunk has unknown finish_reason %q", choice.FinishReason)
 			}
 			d.finished = true
 			d.closeMessage(d.status)
