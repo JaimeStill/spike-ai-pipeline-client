@@ -113,7 +113,7 @@ func TestEncode(t *testing.T) {
 		{
 			name: "single input_text as a string",
 			req:  &protocol.Request{Model: "m", Input: []protocol.Item{text(protocol.RoleUser, "hi")}},
-			want: `{"model":"m","messages":[{"role":"user","content":"hi"}]}`,
+			want: `{"model":"m","stream":false,"messages":[{"role":"user","content":"hi"}]}`,
 		},
 		{
 			name: "instructions as a leading system message",
@@ -122,7 +122,7 @@ func TestEncode(t *testing.T) {
 				Instructions: "Answer in one word.",
 				Input:        []protocol.Item{text(protocol.RoleUser, "Capital of France?")},
 			},
-			want: `{"model":"m","messages":[
+			want: `{"model":"m","stream":false,"messages":[
 				{"role":"system","content":"Answer in one word."},
 				{"role":"user","content":"Capital of France?"}]}`,
 		},
@@ -132,7 +132,7 @@ func TestEncode(t *testing.T) {
 				Role:    protocol.RoleUser,
 				Content: []protocol.ContentPart{protocol.InputText{Text: "one"}, protocol.InputText{Text: "two"}},
 			}}},
-			want: `{"model":"m","messages":[{"role":"user","content":[
+			want: `{"model":"m","stream":false,"messages":[{"role":"user","content":[
 				{"type":"text","text":"one"},{"type":"text","text":"two"}]}]}`,
 		},
 		{
@@ -144,7 +144,7 @@ func TestEncode(t *testing.T) {
 				protocol.Message{Role: protocol.RoleAssistant, Content: []protocol.ContentPart{protocol.OutputText{Text: "a"}}},
 				text(protocol.RoleUser, "u2"),
 			}},
-			want: `{"model":"m","messages":[
+			want: `{"model":"m","stream":false,"messages":[
 				{"role":"system","content":"s"},
 				{"role":"developer","content":"d"},
 				{"role":"user","content":"u"},
@@ -159,7 +159,7 @@ func TestEncode(t *testing.T) {
 				}},
 				text(protocol.RoleUser, "ok"),
 			}},
-			want: `{"model":"m","messages":[
+			want: `{"model":"m","stream":false,"messages":[
 				{"role":"assistant","content":[{"type":"text","text":"Partly:"},{"type":"refusal","refusal":"not that"}]},
 				{"role":"user","content":"ok"}]}`,
 		},
@@ -168,7 +168,7 @@ func TestEncode(t *testing.T) {
 			req: &protocol.Request{Model: "m", Input: []protocol.Item{
 				protocol.Message{Role: protocol.RoleAssistant, Content: []protocol.ContentPart{protocol.Refusal{Refusal: "no"}}},
 			}},
-			want: `{"model":"m","messages":[{"role":"assistant","content":[{"type":"refusal","refusal":"no"}]}]}`,
+			want: `{"model":"m","stream":false,"messages":[{"role":"assistant","content":[{"type":"refusal","refusal":"no"}]}]}`,
 		},
 		{
 			name: "input_image by data URL as image_url, detail omitted when unset",
@@ -179,7 +179,7 @@ func TestEncode(t *testing.T) {
 					protocol.InputImage{ImageURL: protocol.DataURL("image/png", []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'})},
 				},
 			}}},
-			want: `{"model":"m","messages":[{"role":"user","content":[
+			want: `{"model":"m","stream":false,"messages":[{"role":"user","content":[
 				{"type":"text","text":"Describe this image."},
 				{"type":"image_url","image_url":{"url":"data:image/png;base64,iVBORw0KGgo="}}]}]}`,
 		},
@@ -191,7 +191,7 @@ func TestEncode(t *testing.T) {
 					protocol.InputImage{ImageURL: "https://example.com/shapes.png", Detail: protocol.ImageDetailHigh},
 				},
 			}}},
-			want: `{"model":"m","messages":[{"role":"user","content":[
+			want: `{"model":"m","stream":false,"messages":[{"role":"user","content":[
 				{"type":"image_url","image_url":{"url":"https://example.com/shapes.png","detail":"high"}}]}]}`,
 		},
 		{
@@ -203,7 +203,7 @@ func TestEncode(t *testing.T) {
 					protocol.InputAudio{Data: []byte("RIFF\x24\x00\x00\x00WAVE"), Format: protocol.AudioFormatWAV},
 				},
 			}}},
-			want: `{"model":"m","messages":[{"role":"user","content":[
+			want: `{"model":"m","stream":false,"messages":[{"role":"user","content":[
 				{"type":"text","text":"Transcribe this clip."},
 				{"type":"input_audio","input_audio":{"data":"UklGRiQAAABXQVZF","format":"wav"}}]}]}`,
 		},
@@ -213,33 +213,33 @@ func TestEncode(t *testing.T) {
 				Role:    protocol.RoleUser,
 				Content: []protocol.ContentPart{protocol.InputAudio{Data: []byte{0xff, 0xfb, 0x90}, Format: protocol.AudioFormatMP3}},
 			}}},
-			want: `{"model":"m","messages":[{"role":"user","content":[
+			want: `{"model":"m","stream":false,"messages":[{"role":"user","content":[
 				{"type":"input_audio","input_audio":{"data":"//uQ","format":"mp3"}}]}]}`,
 		},
 		{
 			name: "tools as function tools, unset members omitted",
 			req:  withTools(nil),
-			want: `{"model":"m","messages":[{"role":"user","content":"hi"}],` + toolsWire + `}`,
+			want: `{"model":"m","stream":false,"messages":[{"role":"user","content":"hi"}],` + toolsWire + `}`,
 		},
 		{
 			name: "tool_choice auto",
 			req:  withTools(protocol.ToolChoiceAuto),
-			want: `{"model":"m","messages":[{"role":"user","content":"hi"}],` + toolsWire + `,"tool_choice":"auto"}`,
+			want: `{"model":"m","stream":false,"messages":[{"role":"user","content":"hi"}],` + toolsWire + `,"tool_choice":"auto"}`,
 		},
 		{
 			name: "tool_choice none",
 			req:  withTools(protocol.ToolChoiceNone),
-			want: `{"model":"m","messages":[{"role":"user","content":"hi"}],` + toolsWire + `,"tool_choice":"none"}`,
+			want: `{"model":"m","stream":false,"messages":[{"role":"user","content":"hi"}],` + toolsWire + `,"tool_choice":"none"}`,
 		},
 		{
 			name: "tool_choice required",
 			req:  withTools(protocol.ToolChoiceRequired),
-			want: `{"model":"m","messages":[{"role":"user","content":"hi"}],` + toolsWire + `,"tool_choice":"required"}`,
+			want: `{"model":"m","stream":false,"messages":[{"role":"user","content":"hi"}],` + toolsWire + `,"tool_choice":"required"}`,
 		},
 		{
 			name: "tool_choice of a named function",
 			req:  withTools(protocol.FunctionToolChoice{Name: "get_weather"}),
-			want: `{"model":"m","messages":[{"role":"user","content":"hi"}],` + toolsWire + `,
+			want: `{"model":"m","stream":false,"messages":[{"role":"user","content":"hi"}],` + toolsWire + `,
 				"tool_choice":{"type":"function","function":{"name":"get_weather"}}}`,
 		},
 		{
@@ -248,7 +248,7 @@ func TestEncode(t *testing.T) {
 				Tools: []protocol.FunctionToolChoice{{Name: "get_time"}},
 				Mode:  protocol.ToolChoiceAuto,
 			}),
-			want: `{"model":"m","messages":[{"role":"user","content":"hi"}],` + toolsWire + `,
+			want: `{"model":"m","stream":false,"messages":[{"role":"user","content":"hi"}],` + toolsWire + `,
 				"tool_choice":{"type":"allowed_tools","allowed_tools":{"mode":"auto",
 					"tools":[{"type":"function","function":{"name":"get_time"}}]}}}`,
 		},
@@ -258,7 +258,7 @@ func TestEncode(t *testing.T) {
 				Tools: []protocol.FunctionToolChoice{{Name: "get_weather"}, {Name: "get_time"}},
 				Mode:  protocol.ToolChoiceRequired,
 			}),
-			want: `{"model":"m","messages":[{"role":"user","content":"hi"}],` + toolsWire + `,
+			want: `{"model":"m","stream":false,"messages":[{"role":"user","content":"hi"}],` + toolsWire + `,
 				"tool_choice":{"type":"allowed_tools","allowed_tools":{"mode":"required","tools":[
 					{"type":"function","function":{"name":"get_weather"}},
 					{"type":"function","function":{"name":"get_time"}}]}}}`,
@@ -273,7 +273,7 @@ func TestEncode(t *testing.T) {
 				protocol.FunctionCallOutput{CallID: "c1", Output: `{"celsius":21}`},
 				protocol.FunctionCallOutput{CallID: "c2", Output: "09:00"},
 			}},
-			want: `{"model":"m","messages":[
+			want: `{"model":"m","stream":false,"messages":[
 				{"role":"user","content":"Weather and time in Paris?"},
 				{"role":"assistant","content":"Checking.","tool_calls":[
 					{"id":"c1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}},
@@ -288,7 +288,7 @@ func TestEncode(t *testing.T) {
 				protocol.FunctionCall{CallID: "c1", Name: "get_weather", Arguments: `{"city":"Paris"}`},
 				protocol.FunctionCallOutput{CallID: "c1", Output: `{"celsius":21}`},
 			}},
-			want: `{"model":"m","messages":[
+			want: `{"model":"m","stream":false,"messages":[
 				{"role":"user","content":"Weather in Paris?"},
 				{"role":"assistant","tool_calls":[
 					{"id":"c1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}}]},
@@ -307,7 +307,7 @@ func TestEncode(t *testing.T) {
 				protocol.FunctionCallOutput{CallID: "c3", Output: "9"},
 				assistant("Paris 21, Rome 25, Oslo 9."),
 			}},
-			want: `{"model":"m","messages":[
+			want: `{"model":"m","stream":false,"messages":[
 				{"role":"user","content":"Weather in Paris, then Rome?"},
 				{"role":"assistant","tool_calls":[
 					{"id":"c1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}}]},
@@ -327,7 +327,7 @@ func TestEncode(t *testing.T) {
 				text(protocol.RoleUser, "Paris."),
 				protocol.FunctionCall{CallID: "c1", Name: "get_weather", Arguments: `{"city":"Paris"}`},
 			}},
-			want: `{"model":"m","messages":[
+			want: `{"model":"m","stream":false,"messages":[
 				{"role":"assistant","content":"Which city?"},
 				{"role":"user","content":"Paris."},
 				{"role":"assistant","tool_calls":[
@@ -345,7 +345,7 @@ func TestEncode(t *testing.T) {
 				}},
 				protocol.FunctionCallOutput{CallID: "c3", OutputParts: []protocol.ContentPart{protocol.InputText{Text: "25"}}},
 			}},
-			want: `{"model":"m","messages":[
+			want: `{"model":"m","stream":false,"messages":[
 				{"role":"assistant","tool_calls":[
 					{"id":"c1","type":"function","function":{"name":"ping","arguments":"{}"}},
 					{"id":"c2","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}},
@@ -357,7 +357,7 @@ func TestEncode(t *testing.T) {
 		{
 			name: "max_output_tokens as max_completion_tokens",
 			req:  &protocol.Request{Model: "m", Input: []protocol.Item{text(protocol.RoleUser, "hi")}, MaxOutputTokens: 64},
-			want: `{"model":"m","messages":[{"role":"user","content":"hi"}],"max_completion_tokens":64}`,
+			want: `{"model":"m","stream":false,"messages":[{"role":"user","content":"hi"}],"max_completion_tokens":64}`,
 		},
 		{
 			name: "reasoning effort as reasoning_effort",
@@ -366,7 +366,7 @@ func TestEncode(t *testing.T) {
 				Input:     []protocol.Item{text(protocol.RoleUser, "hi")},
 				Reasoning: protocol.ReasoningParam{Effort: protocol.ReasoningEffortXHigh},
 			},
-			want: `{"model":"m","messages":[{"role":"user","content":"hi"}],"reasoning_effort":"xhigh"}`,
+			want: `{"model":"m","stream":false,"messages":[{"role":"user","content":"hi"}],"reasoning_effort":"xhigh"}`,
 		},
 		{
 			name: "plain text format as response_format text",
@@ -375,7 +375,7 @@ func TestEncode(t *testing.T) {
 				Input: []protocol.Item{text(protocol.RoleUser, "hi")},
 				Text:  protocol.TextParam{Format: protocol.PlainTextFormat{}},
 			},
-			want: `{"model":"m","messages":[{"role":"user","content":"hi"}],"response_format":{"type":"text"}}`,
+			want: `{"model":"m","stream":false,"messages":[{"role":"user","content":"hi"}],"response_format":{"type":"text"}}`,
 		},
 		{
 			name: "json_schema format, strict, every field set",
@@ -389,7 +389,7 @@ func TestEncode(t *testing.T) {
 					Strict:      true,
 				}},
 			},
-			want: `{"model":"m","messages":[{"role":"user","content":"Capital of France?"}],
+			want: `{"model":"m","stream":false,"messages":[{"role":"user","content":"Capital of France?"}],
 				"response_format":{"type":"json_schema","json_schema":{
 					"name":"capital",
 					"description":"A country's capital.",
@@ -406,7 +406,7 @@ func TestEncode(t *testing.T) {
 					Schema: []byte(`{"type":"object"}`),
 				}},
 			},
-			want: `{"model":"m","messages":[{"role":"user","content":"Capital of France?"}],
+			want: `{"model":"m","stream":false,"messages":[{"role":"user","content":"Capital of France?"}],
 				"response_format":{"type":"json_schema","json_schema":{"name":"capital","schema":{"type":"object"}}}}`,
 		},
 		{
@@ -418,7 +418,7 @@ func TestEncode(t *testing.T) {
 				Input:  []protocol.Item{text(protocol.RoleUser, "hi")},
 				Native: jsontext.Value(`{"response_format":{"type":"json_object"}}`),
 			},
-			want: `{"model":"m","messages":[{"role":"user","content":"hi"}],"response_format":{"type":"json_object"}}`,
+			want: `{"model":"m","stream":false,"messages":[{"role":"user","content":"hi"}],"response_format":{"type":"json_object"}}`,
 		},
 		{
 			name: "verbosity as verbosity",
@@ -427,7 +427,7 @@ func TestEncode(t *testing.T) {
 				Input: []protocol.Item{text(protocol.RoleUser, "hi")},
 				Text:  protocol.TextParam{Verbosity: protocol.VerbosityLow},
 			},
-			want: `{"model":"m","messages":[{"role":"user","content":"hi"}],"verbosity":"low"}`,
+			want: `{"model":"m","stream":false,"messages":[{"role":"user","content":"hi"}],"verbosity":"low"}`,
 		},
 		{
 			name: "reasoning joins the assistant message and calls after it",
@@ -440,7 +440,7 @@ func TestEncode(t *testing.T) {
 				reasoning(envelopeThenAnswer),
 				assistant("It is 21."),
 			}},
-			want: `{"model":"m","messages":[
+			want: `{"model":"m","stream":false,"messages":[
 				{"role":"user","content":"Weather in Paris?"},
 				{"role":"assistant","content":"Checking.","reasoning_content":"Need the weather tool.","tool_calls":[
 					{"id":"c1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}}]},
@@ -454,7 +454,7 @@ func TestEncode(t *testing.T) {
 				reasoning(envelopeWeatherTool),
 				protocol.FunctionCall{CallID: "c1", Name: "get_weather", Arguments: `{"city":"Paris"}`},
 			}},
-			want: `{"model":"m","messages":[
+			want: `{"model":"m","stream":false,"messages":[
 				{"role":"user","content":"Weather in Paris?"},
 				{"role":"assistant","reasoning_content":"Need the weather tool.","tool_calls":[
 					{"id":"c1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}}]}]}`,
@@ -467,7 +467,7 @@ func TestEncode(t *testing.T) {
 				reasoning(envelopeThenAnswer),
 				assistant("Hello."),
 			}},
-			want: `{"model":"m","messages":[
+			want: `{"model":"m","stream":false,"messages":[
 				{"role":"user","content":"hi"},
 				{"role":"assistant","content":"Hello.","reasoning_content":"The user asks.Then answer."}]}`,
 		},
@@ -479,7 +479,7 @@ func TestEncode(t *testing.T) {
 				reasoning(envelopeWeatherTool),
 				protocol.FunctionCall{CallID: "c1", Name: "get_weather", Arguments: `{}`},
 			}},
-			want: `{"model":"m","messages":[
+			want: `{"model":"m","stream":false,"messages":[
 				{"role":"user","content":"hi"},
 				{"role":"assistant","content":"Hello."},
 				{"role":"assistant","reasoning_content":"Need the weather tool.","tool_calls":[
@@ -498,7 +498,7 @@ func TestEncode(t *testing.T) {
 				reasoning(envelopeEmpty),
 				assistant("Hello."),
 			}},
-			want: `{"model":"m","messages":[
+			want: `{"model":"m","stream":false,"messages":[
 				{"role":"user","content":"hi"},
 				{"role":"assistant","content":"Hello."}]}`,
 		},
@@ -510,7 +510,7 @@ func TestEncode(t *testing.T) {
 				reasoning("gAAAAABo-opaque-provider-blob"),
 				protocol.FunctionCall{CallID: "c1", Name: "get_weather", Arguments: `{}`},
 			}},
-			want: `{"model":"m","messages":[
+			want: `{"model":"m","stream":false,"messages":[
 				{"role":"user","content":"hi"},
 				{"role":"assistant","content":"Checking.","tool_calls":[
 					{"id":"c1","type":"function","function":{"name":"get_weather","arguments":"{}"}}]}]}`,
@@ -523,7 +523,7 @@ func TestEncode(t *testing.T) {
 				text(protocol.RoleUser, "Still there?"),
 				reasoning(envelopeThenAnswer),
 			}},
-			want: `{"model":"m","messages":[
+			want: `{"model":"m","stream":false,"messages":[
 				{"role":"user","content":"hi"},
 				{"role":"user","content":"Still there?"}]}`,
 		},
@@ -534,7 +534,7 @@ func TestEncode(t *testing.T) {
 				Input:  []protocol.Item{text(protocol.RoleUser, "hi")},
 				Native: jsontext.Value(`{"temperature":0.2,"chat_template_kwargs":{"reasoning_effort":"low"}}`),
 			},
-			want: `{"model":"m","messages":[{"role":"user","content":"hi"}],
+			want: `{"model":"m","stream":false,"messages":[{"role":"user","content":"hi"}],
 				"temperature":0.2,"chat_template_kwargs":{"reasoning_effort":"low"}}`,
 		},
 		{
@@ -544,7 +544,7 @@ func TestEncode(t *testing.T) {
 				Input:  []protocol.Item{text(protocol.RoleUser, "hi")},
 				Native: jsontext.Value(`{"max_completion_tokens":32}`),
 			},
-			want: `{"model":"m","messages":[{"role":"user","content":"hi"}],"max_completion_tokens":32}`,
+			want: `{"model":"m","stream":false,"messages":[{"role":"user","content":"hi"}],"max_completion_tokens":32}`,
 		},
 	}
 	for _, tc := range cases {

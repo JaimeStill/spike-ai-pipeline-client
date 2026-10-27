@@ -54,16 +54,39 @@ import (
 // Text's format goes out as response_format: plain text as {"type":"text"}, sent because the
 // caller set it, and a JSON schema as {"type":"json_schema","json_schema":{"name","schema"}},
 // with description and strict when set. Text's verbosity goes out as verbosity.
+// The request is unstreamed, sent with stream false; EncodeStreamRequest streams it.
 // Native's members, the native tier, are merged into the top level, and a member named like one
-// the typed fields set is refused. It adds no headers.
+// the typed fields set is refused, as are stream, which is always set, and stream_options,
+// which the streamed request sets. It adds no headers.
 func (*Format) EncodeRequest(req *protocol.Request, _ http.Header) ([]byte, error) {
+	return encodeRequest(req, false)
+}
+
+// EncodeStreamRequest encodes req as EncodeRequest does, as a streamed request: with stream
+// true, and stream_options.include_usage true, which asks for the usage the stream's terminal
+// event carries. A Native stream or stream_options member is refused, as EncodeRequest refuses
+// them. It adds no headers.
+func (*Format) EncodeStreamRequest(req *protocol.Request, _ http.Header) ([]byte, error) {
+	return encodeRequest(req, true)
+}
+
+// encodeRequest encodes req as EncodeRequest describes, streamed when stream is set.
+func encodeRequest(req *protocol.Request, stream bool) ([]byte, error) {
 	var err error
 	body := request{
 		Model:               req.Model,
 		ReasoningEffort:     string(req.Reasoning.Effort),
 		MaxCompletionTokens: req.MaxOutputTokens,
 		Verbosity:           string(req.Text.Verbosity),
+		Stream:              stream,
 		Native:              req.Native,
+	}
+	if stream {
+		body.StreamOptions = &streamOptions{IncludeUsage: true}
+	} else if hasMember(req.Native, "stream_options") {
+		// The unstreamed body has no stream_options for the member to clash with, but it is
+		// the stream's, so it is refused in both.
+		return nil, errors.New("completions: native member stream_options clashes with the format's streaming")
 	}
 	if req.Text.Format != nil {
 		if body.ResponseFormat, err = encodeTextFormat(req.Text.Format); err != nil {
@@ -100,6 +123,16 @@ func (*Format) EncodeRequest(req *protocol.Request, _ http.Header) ([]byte, erro
 		return nil, fmt.Errorf("completions: %w", err)
 	}
 	return b, nil
+}
+
+// hasMember reports whether native, a request's Native, has a member named name.
+func hasMember(native jsontext.Value, name string) bool {
+	var members map[string]jsontext.Value
+	if len(native) == 0 || json.Unmarshal(native, &members) != nil {
+		return false
+	}
+	_, ok := members[name]
+	return ok
 }
 
 // encodeInput encodes the input items as messages, joining each run of assistant items into one

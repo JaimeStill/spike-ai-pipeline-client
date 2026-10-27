@@ -20,9 +20,21 @@ type request struct {
 	// alike, as aliases of n_predict; max_completion_tokens is the name OpenAI keeps, having
 	// deprecated max_tokens.
 	MaxCompletionTokens int `json:"max_completion_tokens,omitzero"`
+	// Stream is always sent, true for a streamed request and false otherwise, so a Native
+	// stream member clashes with it in both.
+	Stream bool `json:"stream"`
+	// StreamOptions asks a streamed reply for its usage. It is sent with a streamed request
+	// alone, as OpenAI refuses it otherwise.
+	StreamOptions *streamOptions `json:"stream_options,omitzero"`
 	// Native is the request's native tier, its members merged into the top level. A member
 	// named like one the fields above set is a duplicate name, which encoding refuses.
 	Native jsontext.Value `json:",embed"`
+}
+
+// streamOptions is a streamed request's stream_options. IncludeUsage asks for the usage, in a
+// chunk of no choices after the one with the finish_reason.
+type streamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
 }
 
 // message is a Chat Completions message. Content is a string when the message is a single text
@@ -156,14 +168,33 @@ type response struct {
 		} `json:"message"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
-	Usage struct {
-		PromptTokens            int `json:"prompt_tokens"`
-		CompletionTokens        int `json:"completion_tokens"`
-		TotalTokens             int `json:"total_tokens"`
-		CompletionTokensDetails struct {
-			ReasoningTokens int `json:"reasoning_tokens"`
-		} `json:"completion_tokens_details"`
-	} `json:"usage"`
+	Usage usage `json:"usage"`
+}
+
+// usage is a reply's token counts, in a response body or a stream's chunk.
+type usage struct {
+	PromptTokens            int `json:"prompt_tokens"`
+	CompletionTokens        int `json:"completion_tokens"`
+	TotalTokens             int `json:"total_tokens"`
+	CompletionTokensDetails struct {
+		ReasoningTokens int `json:"reasoning_tokens"`
+	} `json:"completion_tokens_details"`
+}
+
+// chunk is the part of a streamed reply's chunk, chat.completion.chunk, the format reads. A
+// null finish_reason or delta member decodes as empty. Usage is set on the chunk that carries
+// it, with stream_options.include_usage the last, of no choices. Members it doesn't read, such
+// as llama.cpp's timings, are ignored.
+type chunk struct {
+	Choices []struct {
+		Index int `json:"index"`
+		Delta struct {
+			Content string `json:"content"`
+			Refusal string `json:"refusal"`
+		} `json:"delta"`
+		FinishReason string `json:"finish_reason"`
+	} `json:"choices"`
+	Usage *usage `json:"usage"`
 }
 
 // envelopePrefix opens every envelope this format writes: the implementor slug, the format, and
