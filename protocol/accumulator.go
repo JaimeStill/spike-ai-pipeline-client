@@ -16,13 +16,14 @@ import (
 // Add refuses an event that doesn't follow the events before it: anything before
 // response.created or after a terminal event, a sequence number that doesn't increase, an item
 // added under the id of one added before it, an event about an item or part that wasn't added or
-// is already done, an item_id that isn't the id of the item at the event's output_index, a part added before the one
-// ahead of it is done, a done event whose text or content isn't what the deltas made, and a
-// terminal response.completed or response.incomplete while an item is open. A refused event
+// is already done, an item_id that isn't the id of the item at the event's output_index, a part
+// added before the one ahead of it is done, an item done before its parts, or a function call's
+// arguments, are done, a done event whose text, arguments, or content isn't what the deltas made,
+// and a terminal response.completed or response.incomplete while an item is open. A refused event
 // changes nothing.
 //
-// It folds message items, of output_text and refusal parts. Its zero value is ready to use; it
-// isn't safe for concurrent use.
+// It folds message items, of output_text and refusal parts, and function_call items, of argument
+// deltas. Its zero value is ready to use; it isn't safe for concurrent use.
 type Accumulator struct {
 	created, ended bool
 	// seq is the sequence number of the last event added.
@@ -40,6 +41,9 @@ type foldItem struct {
 	done bool
 	// parts are a message's content parts, in order.
 	parts []*foldPart
+	// args is a function call's arguments so far, and argsDone is set at their done event.
+	args     strings.Builder
+	argsDone bool
 }
 
 // foldPart is a content part being folded: an OutputText or a Refusal, as added, and its text
@@ -134,6 +138,21 @@ func (a *Accumulator) fold(e Event) error {
 		p.text.WriteString(e.Delta)
 	case RefusalDone:
 		return a.doneText(e.ItemID, e.OutputIndex, e.ContentIndex, true, e.Refusal)
+	case FunctionCallArgumentsDelta:
+		it, err := a.functionCall(e.ItemID, e.OutputIndex)
+		if err != nil {
+			return err
+		}
+		it.args.WriteString(e.Delta)
+	case FunctionCallArgumentsDone:
+		it, err := a.functionCall(e.ItemID, e.OutputIndex)
+		switch {
+		case err != nil:
+			return err
+		case e.Arguments != it.args.String():
+			return fmt.Errorf("arguments %q aren't the arguments their deltas made, %q", e.Arguments, it.args.String())
+		}
+		it.argsDone = true
 	}
 	return nil
 }
@@ -159,7 +178,8 @@ func (a *Accumulator) end(r *Response, closed bool) error {
 	return nil
 }
 
-// addItem folds an output_item.added: the next item in output order, a message with no content.
+// addItem folds an output_item.added: the next item in output order, a message with no content
+// or a function call with no arguments.
 func (a *Accumulator) addItem(e OutputItemAdded) error {
 	if e.OutputIndex != len(a.items) {
 		return fmt.Errorf("output %d added, want output %d next", e.OutputIndex, len(a.items))
@@ -169,6 +189,11 @@ func (a *Accumulator) addItem(e OutputItemAdded) error {
 	case Message:
 		if len(it.Content) > 0 {
 			return errors.New("the message is added with content")
+		}
+		id = it.ID
+	case FunctionCall:
+		if it.Arguments != "" {
+			return errors.New("the function call is added with arguments")
 		}
 		id = it.ID
 	default:
@@ -187,8 +212,9 @@ func (a *Accumulator) addItem(e OutputItemAdded) error {
 	return nil
 }
 
-// doneItem folds an output_item.done: the whole item, the one added there, its parts done and
-// its content what they made.
+// doneItem folds an output_item.done: the whole item, the one added there, a message's parts done
+// and its content what they made, or a function call's arguments done and what their deltas
+// made.
 func (a *Accumulator) doneItem(e OutputItemDone) error {
 	it, err := a.item(e.OutputIndex)
 	if err != nil {
@@ -212,6 +238,18 @@ func (a *Accumulator) doneItem(e OutputItemDone) error {
 			if !samePart(m.Content[i], p.folded()) {
 				return fmt.Errorf("content %d %#v isn't the part streamed, %#v", i, m.Content[i], p.folded())
 			}
+		}
+	case FunctionCall:
+		c, ok := e.Item.(FunctionCall)
+		switch {
+		case !ok:
+			return fmt.Errorf("item %T is done where a function call was added", e.Item)
+		case c.ID != added.ID || c.CallID != added.CallID || c.Name != added.Name:
+			return fmt.Errorf("function call %q, call %q of %s, is done where function call %q, call %q of %s, was added", c.ID, c.CallID, c.Name, added.ID, added.CallID, added.Name)
+		case !it.argsDone:
+			return errors.New("the function call's arguments aren't done")
+		case c.Arguments != it.args.String():
+			return fmt.Errorf("arguments %q aren't the arguments streamed, %q", c.Arguments, it.args.String())
 		}
 	}
 	it.item, it.done = e.Item, true
@@ -286,6 +324,25 @@ func (a *Accumulator) message(itemID string, output int) (*foldItem, error) {
 	return it, nil
 }
 
+// functionCall returns the output item at output, added, not done, and a function call whose id
+// is itemID, with its arguments still open.
+func (a *Accumulator) functionCall(itemID string, output int) (*foldItem, error) {
+	it, err := a.item(output)
+	if err != nil {
+		return nil, err
+	}
+	c, ok := it.item.(FunctionCall)
+	switch {
+	case !ok:
+		return nil, fmt.Errorf("output %d is %T, not a function call", output, it.item)
+	case c.ID != itemID:
+		return nil, fmt.Errorf("output %d is item %q, not %q", output, c.ID, itemID)
+	case it.argsDone:
+		return nil, fmt.Errorf("output %d's arguments are done", output)
+	}
+	return it, nil
+}
+
 // part returns the content part at content of the message at output, added and not done.
 func (a *Accumulator) part(itemID string, output, content int) (*foldPart, error) {
 	it, err := a.message(itemID, output)
@@ -319,8 +376,11 @@ func (a *Accumulator) textPart(itemID string, output, content int, refusal bool)
 
 // itemID returns it's id, empty for an item the accumulator doesn't fold.
 func itemID(it Item) string {
-	if m, ok := it.(Message); ok {
-		return m.ID
+	switch it := it.(type) {
+	case Message:
+		return it.ID
+	case FunctionCall:
+		return it.ID
 	}
 	return ""
 }
@@ -346,7 +406,8 @@ func samePart(got, want ContentPart) bool {
 // Response returns the response folded so far, a new value each call. After a terminal event it
 // is that event's Response. Before one it is the created Response, in StatusInProgress, holding
 // the output so far: each item done as it was done, and each item still open in
-// StatusInProgress with the content its events have made. Before response.created it is empty.
+// StatusInProgress with the content, or the arguments, its events have made. Before
+// response.created it is empty.
 func (a *Accumulator) Response() *Response {
 	r := a.resp
 	if a.ended {
@@ -366,6 +427,10 @@ func (a *Accumulator) Response() *Response {
 			for _, p := range it.parts {
 				item.Content = append(item.Content, p.folded())
 			}
+			r.Output = append(r.Output, item)
+		case FunctionCall:
+			item.Status = StatusInProgress
+			item.Arguments = it.args.String()
 			r.Output = append(r.Output, item)
 		}
 	}
@@ -400,6 +465,10 @@ func describe(e Event) (name string, seq int, ok bool) {
 		return "response.refusal.delta", e.SequenceNumber, true
 	case RefusalDone:
 		return "response.refusal.done", e.SequenceNumber, true
+	case FunctionCallArgumentsDelta:
+		return "response.function_call_arguments.delta", e.SequenceNumber, true
+	case FunctionCallArgumentsDone:
+		return "response.function_call_arguments.done", e.SequenceNumber, true
 	}
 	return "", 0, false
 }

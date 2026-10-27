@@ -86,7 +86,8 @@ func readTestdata(t *testing.T, name string) string {
 }
 
 // trace renders events one per line, each its spec type and the members it carries: a part
-// event's output index, content index, and item id, then its part or text.
+// event's output index, content index, and item id, then its part or text, and an arguments
+// event's output index and item id, then its arguments text.
 func trace(events []protocol.Event) string {
 	var b strings.Builder
 	for _, e := range events {
@@ -113,6 +114,10 @@ func trace(events []protocol.Event) string {
 			fmt.Fprintf(&b, "%d response.refusal.delta %d %d %s %q\n", e.SequenceNumber, e.OutputIndex, e.ContentIndex, e.ItemID, e.Delta)
 		case protocol.RefusalDone:
 			fmt.Fprintf(&b, "%d response.refusal.done %d %d %s %q\n", e.SequenceNumber, e.OutputIndex, e.ContentIndex, e.ItemID, e.Refusal)
+		case protocol.FunctionCallArgumentsDelta:
+			fmt.Fprintf(&b, "%d response.function_call_arguments.delta %d %s %q\n", e.SequenceNumber, e.OutputIndex, e.ItemID, e.Delta)
+		case protocol.FunctionCallArgumentsDone:
+			fmt.Fprintf(&b, "%d response.function_call_arguments.done %d %s %q\n", e.SequenceNumber, e.OutputIndex, e.ItemID, e.Arguments)
 		default:
 			fmt.Fprintf(&b, "%T\n", e)
 		}
@@ -153,18 +158,29 @@ func assertResponse(t *testing.T, got, want *protocol.Response) {
 	}
 }
 
-// asStreamed returns reply, an unstreamed reply's body, as the reply a stream of id gave: its
-// id, id, and its reasoning_content left out, as the stream decoder translates the message
-// alone. The recorded replies were each sent twice, so the streamed one's id isn't the other's.
-func asStreamed(t *testing.T, reply, id string) string {
+// asStreamed returns reply, an unstreamed reply's body, as the reply body, a text/event-stream
+// reply, gave: its id the stream's first chunk's, each tool call's id the one the stream gave the
+// call in its place, and its reasoning_content left out, as the stream decoder translates the
+// message and its calls alone. The recorded replies were each sent twice, and the router makes
+// new ids for each, so the streamed reply's ids aren't the other's.
+func asStreamed(t *testing.T, reply, body string) string {
 	t.Helper()
 	var r map[string]any
 	if err := json.Unmarshal([]byte(reply), &r); err != nil {
 		t.Fatal(err)
 	}
-	r["id"] = id
+	r["id"] = firstChunkID(t, body)
+	callIDs := streamCallIDs(t, body)
 	for _, c := range r["choices"].([]any) {
-		delete(c.(map[string]any)["message"].(map[string]any), "reasoning_content")
+		m := c.(map[string]any)["message"].(map[string]any)
+		delete(m, "reasoning_content")
+		calls, _ := m["tool_calls"].([]any)
+		if len(calls) != len(callIDs) {
+			t.Fatalf("the reply has %d tool calls, the stream %d", len(calls), len(callIDs))
+		}
+		for i, call := range calls {
+			call.(map[string]any)["id"] = callIDs[i]
+		}
 	}
 	b, err := json.Marshal(r)
 	if err != nil {
@@ -187,6 +203,45 @@ func firstChunkID(t *testing.T, body string) string {
 		t.Fatal(err)
 	}
 	return c.ID
+}
+
+// streamCallIDs returns the ids of the tool calls in body, a text/event-stream reply, in the
+// order their first fragments arrive: each fragment that carries one.
+func streamCallIDs(t *testing.T, body string) []string {
+	t.Helper()
+	var ids []string
+	events := sse.NewDecoder(strings.NewReader(body))
+	for {
+		e, err := events.Next()
+		if errors.Is(err, io.EOF) {
+			return ids
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if e.Data == "[DONE]" {
+			continue
+		}
+		var c struct {
+			Choices []struct {
+				Delta struct {
+					ToolCalls []struct {
+						ID string `json:"id"`
+					} `json:"tool_calls"`
+				} `json:"delta"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal([]byte(e.Data), &c); err != nil {
+			t.Fatal(err)
+		}
+		for _, choice := range c.Choices {
+			for _, call := range choice.Delta.ToolCalls {
+				if call.ID != "" {
+					ids = append(ids, call.ID)
+				}
+			}
+		}
+	}
 }
 
 // TestStreamRecorded translates the recorded router streams to events, and folds them to the
@@ -225,6 +280,43 @@ func TestStreamRecorded(t *testing.T) {
 			12 response.content_part.done 0 0 chatcmpl-Ua3L4FAciVzBKIrsejypEGgyaReDN4Rk/0 protocol.OutputText{Text:"1, 2, 3,"}
 			13 response.output_item.done 0 protocol.Message{ID:"chatcmpl-Ua3L4FAciVzBKIrsejypEGgyaReDN4Rk/0", Status:"incomplete", Role:"assistant", Content:[]protocol.ContentPart{protocol.OutputText{Text:"1, 2, 3,"}}}
 			14 response.incomplete 1 items`},
+		{"tool_call", `
+			0 response.created in_progress
+			1 response.output_item.added 0 protocol.FunctionCall{ID:"chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/0", Status:"in_progress", CallID:"LsrzvhpPKdbtJyriZMr6ivjrWBgmWA3j", Name:"get_weather", Arguments:""}
+			2 response.function_call_arguments.delta 0 chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/0 "{"
+			3 response.function_call_arguments.delta 0 chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/0 "\n  \""
+			4 response.function_call_arguments.delta 0 chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/0 "city"
+			5 response.function_call_arguments.delta 0 chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/0 "\":"
+			6 response.function_call_arguments.delta 0 chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/0 " \""
+			7 response.function_call_arguments.delta 0 chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/0 "Paris"
+			8 response.function_call_arguments.delta 0 chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/0 "\""
+			9 response.function_call_arguments.delta 0 chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/0 "\n}"
+			10 response.function_call_arguments.done 0 chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/0 "{\n  \"city\": \"Paris\"\n}"
+			11 response.output_item.done 0 protocol.FunctionCall{ID:"chatcmpl-fbwrSmHus4NqdExvtVzLfY0BV9kduppP/0", Status:"completed", CallID:"LsrzvhpPKdbtJyriZMr6ivjrWBgmWA3j", Name:"get_weather", Arguments:"{\n  \"city\": \"Paris\"\n}"}
+			12 response.completed 1 items`},
+		{"parallel_tool_calls", `
+			0 response.created in_progress
+			1 response.output_item.added 0 protocol.FunctionCall{ID:"chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/0", Status:"in_progress", CallID:"zzwGjyJxRF0NLM9cl3nvl9X1uykH0HJn", Name:"get_weather", Arguments:""}
+			2 response.function_call_arguments.delta 0 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/0 "{"
+			3 response.function_call_arguments.delta 0 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/0 "\"city"
+			4 response.function_call_arguments.delta 0 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/0 "\":"
+			5 response.function_call_arguments.delta 0 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/0 "\""
+			6 response.function_call_arguments.delta 0 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/0 "Paris"
+			7 response.function_call_arguments.delta 0 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/0 "\""
+			8 response.function_call_arguments.delta 0 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/0 "}"
+			9 response.function_call_arguments.done 0 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/0 "{\"city\":\"Paris\"}"
+			10 response.output_item.done 0 protocol.FunctionCall{ID:"chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/0", Status:"completed", CallID:"zzwGjyJxRF0NLM9cl3nvl9X1uykH0HJn", Name:"get_weather", Arguments:"{\"city\":\"Paris\"}"}
+			11 response.output_item.added 1 protocol.FunctionCall{ID:"chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/1", Status:"in_progress", CallID:"EXc5ifcsLJtON5nVlTOtEvXtYSHnWbgi", Name:"get_weather", Arguments:""}
+			12 response.function_call_arguments.delta 1 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/1 "{"
+			13 response.function_call_arguments.delta 1 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/1 "\"city"
+			14 response.function_call_arguments.delta 1 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/1 "\":"
+			15 response.function_call_arguments.delta 1 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/1 "\""
+			16 response.function_call_arguments.delta 1 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/1 "Tokyo"
+			17 response.function_call_arguments.delta 1 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/1 "\""
+			18 response.function_call_arguments.delta 1 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/1 "}"
+			19 response.function_call_arguments.done 1 chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/1 "{\"city\":\"Tokyo\"}"
+			20 response.output_item.done 1 protocol.FunctionCall{ID:"chatcmpl-SDOdqBEtCPhaKm5xDbwNCDkOz758MHkS/1", Status:"completed", CallID:"EXc5ifcsLJtON5nVlTOtEvXtYSHnWbgi", Name:"get_weather", Arguments:"{\"city\":\"Tokyo\"}"}
+			21 response.completed 2 items`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -234,7 +326,7 @@ func TestStreamRecorded(t *testing.T) {
 				t.Fatalf("stream error: %v", r.err)
 			}
 			assertTrace(t, r.events, tc.trace)
-			want, err := decode(asStreamed(t, readTestdata(t, tc.name+".json"), firstChunkID(t, body)))
+			want, err := decode(asStreamed(t, readTestdata(t, tc.name+".json"), body))
 			if err != nil {
 				t.Fatalf("DecodeResponse: %v", err)
 			}
@@ -342,6 +434,114 @@ func TestStreamParts(t *testing.T) {
 	}
 }
 
+// callDelta is a delta of one tool call fragment, of index: the call's first fragment when id is
+// set, carrying id, type function, and name, and a later one, of arguments alone, otherwise.
+func callDelta(index int, id, name, arguments string) string {
+	args, err := json.Marshal(arguments)
+	if err != nil {
+		panic(err)
+	}
+	if id == "" {
+		return fmt.Sprintf(`{"tool_calls":[{"index":%d,"function":{"arguments":%s}}]}`, index, args)
+	}
+	return fmt.Sprintf(`{"tool_calls":[{"index":%d,"id":%q,"type":"function","function":{"name":%q,"arguments":%s}}]}`, index, id, name, args)
+}
+
+// TestStreamToolCalls covers function calls: a call closes the message ahead of it, completed;
+// each call closes the one ahead of it, completed; the call open at the finish_reason takes the
+// status it gives; and each folds to what DecodeResponse gives for the same reply.
+func TestStreamToolCalls(t *testing.T) {
+	cases := []struct {
+		name   string
+		chunks []string
+		trace  string
+		reply  string
+	}{
+		{
+			name: "a message, then a call",
+			chunks: []string{
+				delta(`{"content":"Checking."}`, ""),
+				delta(callDelta(0, "c1", "get_weather", `{"city":`), ""),
+				delta(callDelta(0, "", "", `"Paris"}`), ""),
+				delta(`{}`, "tool_calls"),
+				usageChunk, "[DONE]",
+			},
+			trace: `
+				0 response.created in_progress
+				1 response.output_item.added 0 protocol.Message{ID:"chatcmpl-1/0", Status:"in_progress", Role:"assistant", Content:[]protocol.ContentPart(nil)}
+				2 response.content_part.added 0 0 chatcmpl-1/0 protocol.OutputText{Text:""}
+				3 response.output_text.delta 0 0 chatcmpl-1/0 "Checking."
+				4 response.output_text.done 0 0 chatcmpl-1/0 "Checking."
+				5 response.content_part.done 0 0 chatcmpl-1/0 protocol.OutputText{Text:"Checking."}
+				6 response.output_item.done 0 protocol.Message{ID:"chatcmpl-1/0", Status:"completed", Role:"assistant", Content:[]protocol.ContentPart{protocol.OutputText{Text:"Checking."}}}
+				7 response.output_item.added 1 protocol.FunctionCall{ID:"chatcmpl-1/1", Status:"in_progress", CallID:"c1", Name:"get_weather", Arguments:""}
+				8 response.function_call_arguments.delta 1 chatcmpl-1/1 "{\"city\":"
+				9 response.function_call_arguments.delta 1 chatcmpl-1/1 "\"Paris\"}"
+				10 response.function_call_arguments.done 1 chatcmpl-1/1 "{\"city\":\"Paris\"}"
+				11 response.output_item.done 1 protocol.FunctionCall{ID:"chatcmpl-1/1", Status:"completed", CallID:"c1", Name:"get_weather", Arguments:"{\"city\":\"Paris\"}"}
+				12 response.completed 2 items`,
+			reply: `{"id":"chatcmpl-1","choices":[{"message":{"content":"Checking.","tool_calls":[
+					{"id":"c1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}}]},
+				"finish_reason":"tool_calls"}],"usage":{"completion_tokens":5,"prompt_tokens":7,"total_tokens":12}}`,
+		},
+		{
+			name: "two calls cut off at the bound, only the last incomplete",
+			chunks: []string{
+				delta(callDelta(0, "c1", "get_weather", `{"city":"Paris"}`), ""),
+				delta(callDelta(1, "c2", "get_weather", `{"ci`), ""),
+				delta(`{}`, "length"),
+				usageChunk, "[DONE]",
+			},
+			trace: `
+				0 response.created in_progress
+				1 response.output_item.added 0 protocol.FunctionCall{ID:"chatcmpl-1/0", Status:"in_progress", CallID:"c1", Name:"get_weather", Arguments:""}
+				2 response.function_call_arguments.delta 0 chatcmpl-1/0 "{\"city\":\"Paris\"}"
+				3 response.function_call_arguments.done 0 chatcmpl-1/0 "{\"city\":\"Paris\"}"
+				4 response.output_item.done 0 protocol.FunctionCall{ID:"chatcmpl-1/0", Status:"completed", CallID:"c1", Name:"get_weather", Arguments:"{\"city\":\"Paris\"}"}
+				5 response.output_item.added 1 protocol.FunctionCall{ID:"chatcmpl-1/1", Status:"in_progress", CallID:"c2", Name:"get_weather", Arguments:""}
+				6 response.function_call_arguments.delta 1 chatcmpl-1/1 "{\"ci"
+				7 response.function_call_arguments.done 1 chatcmpl-1/1 "{\"ci"
+				8 response.output_item.done 1 protocol.FunctionCall{ID:"chatcmpl-1/1", Status:"incomplete", CallID:"c2", Name:"get_weather", Arguments:"{\"ci"}
+				9 response.incomplete 2 items`,
+			reply: `{"id":"chatcmpl-1","choices":[{"message":{"tool_calls":[
+					{"id":"c1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}},
+					{"id":"c2","type":"function","function":{"name":"get_weather","arguments":"{\"ci"}}]},
+				"finish_reason":"length"}],"usage":{"completion_tokens":5,"prompt_tokens":7,"total_tokens":12}}`,
+		},
+		{
+			name: "a call of no arguments, its first fragment repeated",
+			chunks: []string{
+				delta(callDelta(0, "c1", "get_time", ""), ""),
+				delta(callDelta(0, "c1", "get_time", ""), ""),
+				delta(`{}`, "tool_calls"),
+			},
+			trace: `
+				0 response.created in_progress
+				1 response.output_item.added 0 protocol.FunctionCall{ID:"chatcmpl-1/0", Status:"in_progress", CallID:"c1", Name:"get_time", Arguments:""}
+				2 response.function_call_arguments.done 0 chatcmpl-1/0 ""
+				3 response.output_item.done 0 protocol.FunctionCall{ID:"chatcmpl-1/0", Status:"completed", CallID:"c1", Name:"get_time", Arguments:""}
+				4 response.completed 1 items`,
+			reply: `{"id":"chatcmpl-1","choices":[{"message":{"tool_calls":[
+					{"id":"c1","type":"function","function":{"name":"get_time","arguments":""}}]},
+				"finish_reason":"tool_calls"}]}`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := decodeStream(t, stream(tc.chunks...))
+			if r.err != nil {
+				t.Fatalf("stream error: %v", r.err)
+			}
+			assertTrace(t, r.events, tc.trace)
+			want, err := decode(tc.reply)
+			if err != nil {
+				t.Fatalf("DecodeResponse: %v", err)
+			}
+			assertResponse(t, fold(t, r.events), want)
+		})
+	}
+}
+
 // TestStreamNoReplyID wants a stream whose chunks carry no id to give its message no id, as
 // DecodeResponse gives the same reply: there is nothing to derive one from.
 func TestStreamNoReplyID(t *testing.T) {
@@ -426,6 +626,12 @@ func TestStreamRefusesChunk(t *testing.T) {
 		{"chunk of another reply", []string{text, strings.Replace(text, "chatcmpl-1", "chatcmpl-2", 1)}, `chunk of reply "chatcmpl-2" in the stream of reply "chatcmpl-1"`},
 		{"chunk of no id after one of an id", []string{text, strings.Replace(text, `"id":"chatcmpl-1",`, "", 1)}, `chunk of reply "" in the stream of reply "chatcmpl-1"`},
 		{"event after [DONE]", []string{text, delta(`{}`, "stop"), "[DONE]", usageChunk}, "event after the end of the stream"},
+		{"a tool call after the finish_reason", []string{text, delta(`{}`, "stop"), delta(callDelta(0, "c1", "get_weather", "{}"), "")}, "delta after the finish_reason"},
+		{"a fragment of a closed call", []string{delta(callDelta(0, "c1", "get_weather", "{"), ""), delta(callDelta(1, "c2", "get_time", "{}"), ""), delta(callDelta(0, "", "", "}"), "")}, "a fragment of tool call 0 after tool call 1 began"},
+		{"a first fragment of no name", []string{delta(callDelta(0, "c1", "", "{}"), "")}, "tool call 0's first fragment has no function name"},
+		{"a first fragment of another type", []string{delta(strings.Replace(callDelta(0, "c1", "get_weather", "{}"), `"function"`, `"custom"`, 1), "")}, `tool call 0 has unknown type "custom"`},
+		{"a fragment naming another call", []string{delta(callDelta(0, "c1", "get_weather", "{"), ""), delta(callDelta(0, "c2", "get_weather", "}"), "")}, `a fragment of tool call 0 names call "c2"`},
+		{"message text after a call", []string{delta(callDelta(0, "c1", "get_weather", "{}"), ""), text}, "message text after a tool call"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

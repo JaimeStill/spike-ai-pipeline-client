@@ -22,14 +22,16 @@ import (
 // it, which EncodeRequest reads back. The message then becomes an assistant message item, its content an output_text part and its refusal a refusal part;
 // a message with neither gives no message item. Each of its tool_calls then becomes a
 // function_call item, in order, its call_id the call's id; a call of a type other than function
-// is an error. The first choice's finish_reason gives the response's status, which the items
-// take:
+// is an error. The first choice's finish_reason gives the response's status:
 //
 //	stop, tool_calls  completed
 //	length            incomplete, reason max_output_tokens
 //	content_filter    incomplete, reason content_filter
 //
-// Any other finish_reason, or a body with no choices, is an error. The reply's usage gives the
+// The last output item takes the response's status, and the items before it are completed, as
+// the spec has only the last item incomplete: the model finished each item before it began the
+// next. A reasoning item has no status, so it takes none. Any other finish_reason, or a body with
+// no choices, is an error. The reply's usage gives the
 // response's: prompt_tokens, completion_tokens, total_tokens, and
 // completion_tokens_details.reasoning_tokens.
 func (*Format) DecodeResponse(body []byte) (*protocol.Response, error) {
@@ -69,7 +71,7 @@ func (*Format) DecodeResponse(body []byte) (*protocol.Response, error) {
 	if len(content) > 0 {
 		resp.Output = append(resp.Output, protocol.Message{
 			ID:      id(),
-			Status:  resp.Status,
+			Status:  protocol.StatusCompleted,
 			Role:    protocol.RoleAssistant,
 			Content: content,
 		})
@@ -80,13 +82,30 @@ func (*Format) DecodeResponse(body []byte) (*protocol.Response, error) {
 		}
 		resp.Output = append(resp.Output, protocol.FunctionCall{
 			ID:        id(),
-			Status:    resp.Status,
+			Status:    protocol.StatusCompleted,
 			CallID:    c.ID,
 			Name:      c.Function.Name,
 			Arguments: c.Function.Arguments,
 		})
 	}
+	if last := len(resp.Output) - 1; last >= 0 {
+		resp.Output[last] = withStatus(resp.Output[last], resp.Status)
+	}
 	return resp, nil
+}
+
+// withStatus returns it with status, or it unchanged when it is an item with no status, a
+// reasoning item.
+func withStatus(it protocol.Item, status protocol.Status) protocol.Item {
+	switch it := it.(type) {
+	case protocol.Message:
+		it.Status = status
+		return it
+	case protocol.FunctionCall:
+		it.Status = status
+		return it
+	}
+	return it
 }
 
 // itemID returns the id of the output item at output in the reply whose id is reply: the reply's
@@ -155,9 +174,24 @@ func (*Format) DecodeError(body []byte) (message, typ, code string) {
 // choice's content and refusal deltas make the assistant message: output_item.added, in
 // progress, when the first of them arrives; then for each run of content, or of refusal, a
 // part, output_text or refusal, with content_part.added, its deltas, its done event, and
-// content_part.done; and output_item.done carrying the whole message once the finish_reason
-// arrives, the message taking the status it gives, as DecodeResponse maps it. A delta that is
-// empty makes no event. It translates the message alone: a chunk's other members are ignored.
+// content_part.done; and output_item.done carrying the whole message. A delta that is empty
+// makes no event.
+//
+// The choice's tool_calls deltas then make a function_call item for each call, found by its
+// index. A call's first fragment carries its id, the item's call_id, its type, function, and its
+// name; it closes the item open before it, the message or the call ahead, and adds the call:
+// output_item.added, in progress, with its call_id and name and no arguments. Each fragment's
+// argument text, the first's included, is a function_call_arguments.delta. The call closes with
+// function_call_arguments.done, its arguments the deltas joined, and output_item.done carrying the
+// whole call. Calls are made one after another, in the order of their indexes, so a fragment of
+// a call already closed is an error, as is a first fragment of another type or with no name, a
+// later fragment naming another id or function, and message text after a call has begun: the
+// output keeps DecodeResponse's order, the message ahead of the calls.
+//
+// An item closed because a later one began is completed. The item open when the finish_reason
+// arrives closes then, taking the status it gives, as DecodeResponse maps it, so only the last
+// item can be incomplete. It translates the message and its calls alone: a chunk's other members,
+// reasoning_content among them, are ignored.
 //
 // The stream ends at data [DONE], or at the end of the stream once the finish_reason has
 // arrived, where it closes with the terminal event: response.completed or
@@ -166,9 +200,8 @@ func (*Format) DecodeError(body []byte) (message, typ, code string) {
 // io.ErrUnexpectedEOF; so is [DONE] without one. A chunk that isn't JSON, an unknown
 // finish_reason, a delta after the finish_reason, or an event after [DONE] is an error. The
 // stream's id is its first chunk's, which every chunk repeats; a chunk with another id is an
-// error. The message's id, its events' item_id, is the one DecodeResponse gives it: itemID
-// derives it from the stream's id and the message's output index, as Chat Completions supplies
-// no item ids.
+// error. Each item's id, its events' item_id, is the one DecodeResponse gives it: itemID derives
+// it from the stream's id and the item's output index, as Chat Completions supplies no item ids.
 func (*Format) NewStreamDecoder() format.StreamDecoder {
 	return &streamDecoder{}
 }
@@ -192,6 +225,10 @@ type streamDecoder struct {
 	output []protocol.Item
 	// message is the message open, nil when none is.
 	message *streamMessage
+	// call is the function call open, nil when none is; called is set once the first call is
+	// added.
+	call   *streamCall
+	called bool
 	// events are the events the current call has made.
 	events []protocol.Event
 }
@@ -207,6 +244,19 @@ type streamMessage struct {
 	// text so far.
 	part partKind
 	text strings.Builder
+}
+
+// streamCall is a function call a stream is making.
+type streamCall struct {
+	// id is the item's id, and index its place in the output.
+	id    string
+	index int
+	// toolIndex is the call's index among the reply's tool calls, which its fragments carry.
+	toolIndex int
+	// callID and name are the first fragment's id and function name.
+	callID, name string
+	// args is the call's arguments so far.
+	args strings.Builder
 }
 
 // partKind is the kind of a message's open part.
@@ -260,11 +310,20 @@ func (d *streamDecoder) decode(data []byte) error {
 			continue
 		}
 		delta := choice.Delta
-		if d.finished && delta.Content+delta.Refusal != "" {
+		if d.finished && (delta.Content+delta.Refusal != "" || len(delta.ToolCalls) > 0) {
 			return errors.New("delta after the finish_reason")
 		}
-		d.delta(partText, delta.Content)
-		d.delta(partRefusal, delta.Refusal)
+		if err := d.delta(partText, delta.Content); err != nil {
+			return err
+		}
+		if err := d.delta(partRefusal, delta.Refusal); err != nil {
+			return err
+		}
+		for _, f := range delta.ToolCalls {
+			if err := d.toolCall(f); err != nil {
+				return err
+			}
+		}
 		if choice.FinishReason != "" {
 			if d.finished {
 				return errors.New("a second finish_reason")
@@ -275,6 +334,7 @@ func (d *streamDecoder) decode(data []byte) error {
 			}
 			d.finished = true
 			d.closeMessage(d.status)
+			d.closeCall(d.status)
 		}
 	}
 	return nil
@@ -315,10 +375,13 @@ func (d *streamDecoder) end() error {
 }
 
 // delta appends text to the message's open part of kind, opening the message, and the part,
-// when it isn't open. An empty text makes nothing.
-func (d *streamDecoder) delta(kind partKind, text string) {
+// when it isn't open. An empty text makes nothing; text once a call has begun is an error.
+func (d *streamDecoder) delta(kind partKind, text string) error {
 	if text == "" {
-		return
+		return nil
+	}
+	if d.called {
+		return errors.New("message text after a tool call")
 	}
 	m := d.message
 	if m == nil {
@@ -345,6 +408,58 @@ func (d *streamDecoder) delta(kind partKind, text string) {
 	} else {
 		d.emit(protocol.OutputTextDelta{SequenceNumber: d.next(), ItemID: m.id, OutputIndex: m.index, ContentIndex: len(m.content), Delta: text})
 	}
+	return nil
+}
+
+// toolCall folds f, a tool call's fragment, as NewStreamDecoder describes: a call's first
+// fragment closes the item open and adds the call, and its argument text, and every later
+// fragment's, is a delta of the call's arguments.
+func (d *streamDecoder) toolCall(f toolCallDelta) error {
+	c := d.call
+	switch {
+	case c != nil && f.Index < c.toolIndex:
+		return fmt.Errorf("a fragment of tool call %d after tool call %d began", f.Index, c.toolIndex)
+	case c != nil && f.Index == c.toolIndex:
+		if (f.ID != "" && f.ID != c.callID) || (f.Function.Name != "" && f.Function.Name != c.name) {
+			return fmt.Errorf("a fragment of tool call %d names call %q of %q, not call %q of %q", f.Index, f.ID, f.Function.Name, c.callID, c.name)
+		}
+	default:
+		if f.Type != "function" {
+			return fmt.Errorf("tool call %d has unknown type %q", f.Index, f.Type)
+		}
+		if f.Function.Name == "" {
+			return fmt.Errorf("tool call %d's first fragment has no function name", f.Index)
+		}
+		d.closeMessage(protocol.StatusCompleted)
+		d.closeCall(protocol.StatusCompleted)
+		c = &streamCall{id: itemID(d.id, len(d.output)), index: len(d.output), toolIndex: f.Index, callID: f.ID, name: f.Function.Name}
+		d.call, d.called = c, true
+		d.emit(protocol.OutputItemAdded{
+			SequenceNumber: d.next(),
+			OutputIndex:    c.index,
+			Item:           protocol.FunctionCall{ID: c.id, Status: protocol.StatusInProgress, CallID: c.callID, Name: c.name},
+		})
+	}
+	if args := f.Function.Arguments; args != "" {
+		c.args.WriteString(args)
+		d.emit(protocol.FunctionCallArgumentsDelta{SequenceNumber: d.next(), ItemID: c.id, OutputIndex: c.index, Delta: args})
+	}
+	return nil
+}
+
+// closeCall closes the open function call, if there is one: function_call_arguments.done, then
+// output_item.done carrying the whole call, of status.
+func (d *streamDecoder) closeCall(status protocol.Status) {
+	c := d.call
+	if c == nil {
+		return
+	}
+	args := c.args.String()
+	d.emit(protocol.FunctionCallArgumentsDone{SequenceNumber: d.next(), ItemID: c.id, OutputIndex: c.index, Arguments: args})
+	call := protocol.FunctionCall{ID: c.id, Status: status, CallID: c.callID, Name: c.name, Arguments: args}
+	d.emit(protocol.OutputItemDone{SequenceNumber: d.next(), OutputIndex: c.index, Item: call})
+	d.output = append(d.output, call)
+	d.call = nil
 }
 
 // closePart closes the message's open part, if it has one: its text's done event, then

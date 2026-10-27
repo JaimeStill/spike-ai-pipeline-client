@@ -14,8 +14,9 @@
 // [Accumulator] folds them into the Response an unstreamed request returns. The subset is the
 // state events response.created and the terminal response.completed, response.incomplete, and
 // response.failed; the item events response.output_item.added and .done; the part events
-// response.content_part.added and .done; and the text events response.output_text.delta and
-// .done, and response.refusal.delta and .done. It leaves out response.queued and
+// response.content_part.added and .done; the text events response.output_text.delta and .done,
+// and response.refusal.delta and .done; and the argument events
+// response.function_call_arguments.delta and .done. It leaves out response.queued and
 // response.in_progress, reasoning summary events, output_text annotations, and logprobs.
 //
 // # Client extensions
@@ -96,6 +97,10 @@
 //   - [OutputTextDone] is response.output_text.done, an output_text part's whole text.
 //   - [RefusalDelta] is response.refusal.delta, text appended to a refusal part.
 //   - [RefusalDone] is response.refusal.done, a refusal part's whole text.
+//   - [FunctionCallArgumentsDelta] is response.function_call_arguments.delta, argument text
+//     appended to a function_call item.
+//   - [FunctionCallArgumentsDone] is response.function_call_arguments.done, a function_call
+//     item's whole arguments.
 //   - [Accumulator] folds a stream's events into the Response they describe.
 //   - [Accumulator.Add] folds the next event, refusing one that doesn't follow the events
 //     before it.

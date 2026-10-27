@@ -126,6 +126,7 @@ func TestAccumulatorRefusesEvent(t *testing.T) {
 		{"a part of an unsupported type", 2, protocol.ContentPartAdded{SequenceNumber: 2, Part: protocol.InputText{}}, "unsupported part"},
 		{"a part added before the one ahead is done", 4, protocol.ContentPartAdded{SequenceNumber: 4, ContentIndex: 1, Part: protocol.Refusal{}}, "content 0 isn't done"},
 		{"a delta of a part not added", 2, protocol.OutputTextDelta{SequenceNumber: 2, Delta: "x"}, "content 0 wasn't added"},
+		{"an arguments delta of a message", 2, protocol.FunctionCallArgumentsDelta{SequenceNumber: 2, Delta: "x"}, "is protocol.Message, not a function call"},
 		{"a refusal delta of an output_text part", 3, protocol.RefusalDelta{SequenceNumber: 3, Delta: "x"}, "is protocol.OutputText"},
 		{"a text delta of a refusal part", 8, protocol.OutputTextDelta{SequenceNumber: 8, ContentIndex: 1, Delta: "x"}, "is protocol.Refusal"},
 		{"a delta after the text is done", 6, protocol.OutputTextDelta{SequenceNumber: 6, Delta: "x"}, "text is done"},
@@ -200,5 +201,105 @@ func TestAccumulatorItemIDs(t *testing.T) {
 	}
 	if err := items("r/0", "r/0", "r/1"); err == nil || !strings.Contains(err.Error(), `item "r/0" is already output 0`) {
 		t.Errorf("Add(a repeated id) = %v, want an error naming the earlier output", err)
+	}
+}
+
+// callStream is a whole stream of one function call, its arguments `{"city":"Paris"}` in two
+// deltas, ending with response.completed.
+func callStream() []protocol.Event {
+	added := protocol.FunctionCall{ID: "r/0", Status: protocol.StatusInProgress, CallID: "c1", Name: "get_weather"}
+	call := protocol.FunctionCall{ID: "r/0", Status: protocol.StatusCompleted, CallID: "c1", Name: "get_weather", Arguments: `{"city":"Paris"}`}
+	return []protocol.Event{
+		protocol.ResponseCreated{SequenceNumber: 0, Response: &protocol.Response{Status: protocol.StatusInProgress}},
+		protocol.OutputItemAdded{SequenceNumber: 1, Item: added},
+		protocol.FunctionCallArgumentsDelta{SequenceNumber: 2, ItemID: "r/0", Delta: `{"city":`},
+		protocol.FunctionCallArgumentsDelta{SequenceNumber: 3, ItemID: "r/0", Delta: `"Paris"}`},
+		protocol.FunctionCallArgumentsDone{SequenceNumber: 4, ItemID: "r/0", Arguments: `{"city":"Paris"}`},
+		protocol.OutputItemDone{SequenceNumber: 5, Item: call},
+		protocol.ResponseCompleted{SequenceNumber: 6, Response: &protocol.Response{
+			Output: []protocol.Item{call},
+			Status: protocol.StatusCompleted,
+		}},
+	}
+}
+
+// TestAccumulatorFunctionCall wants a function call folded: open, in progress with the arguments
+// its deltas have made, and done, the call as done, and after the terminal event that event's
+// response.
+func TestAccumulatorFunctionCall(t *testing.T) {
+	inProgress := func(arguments string) *protocol.Response {
+		return &protocol.Response{Status: protocol.StatusInProgress, Output: []protocol.Item{protocol.FunctionCall{
+			ID: "r/0", Status: protocol.StatusInProgress, CallID: "c1", Name: "get_weather", Arguments: arguments,
+		}}}
+	}
+	events := callStream()
+	cases := []struct {
+		events int
+		want   *protocol.Response
+	}{
+		{2, inProgress("")},
+		{3, inProgress(`{"city":`)},
+		{5, inProgress(`{"city":"Paris"}`)},
+		{6, &protocol.Response{Status: protocol.StatusInProgress, Output: []protocol.Item{events[5].(protocol.OutputItemDone).Item}}},
+		{7, events[6].(protocol.ResponseCompleted).Response},
+	}
+	for _, tc := range cases {
+		var acc protocol.Accumulator
+		add(t, &acc, callStream()[:tc.events])
+		if got := acc.Response(); !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("after %d events, Response = %#v\nwant %#v", tc.events, got, tc.want)
+		}
+	}
+}
+
+// TestAccumulatorRefusesArgumentsEvent covers the function call events that don't follow the
+// events before them: arguments events out of order, of another item, and arguments the deltas
+// didn't make. Each case folds the first n events of callStream, then wants e refused, and the
+// response unchanged.
+func TestAccumulatorRefusesArgumentsEvent(t *testing.T) {
+	call := callStream()[5].(protocol.OutputItemDone).Item.(protocol.FunctionCall)
+	with := func(edit func(*protocol.FunctionCall)) protocol.FunctionCall {
+		c := call
+		edit(&c)
+		return c
+	}
+	cases := []struct {
+		name string
+		n    int
+		e    protocol.Event
+		want string
+	}{
+		{"a call added with arguments", 1, protocol.OutputItemAdded{SequenceNumber: 1, Item: call}, "added with arguments"},
+		{"a delta of a call not added", 1, protocol.FunctionCallArgumentsDelta{SequenceNumber: 1, ItemID: "r/0", Delta: "{"}, "output 0 wasn't added"},
+		{"a done of a call not added", 1, protocol.FunctionCallArgumentsDone{SequenceNumber: 1, ItemID: "r/0"}, "output 0 wasn't added"},
+		{"a delta of another item id", 2, protocol.FunctionCallArgumentsDelta{SequenceNumber: 2, ItemID: "r/1", Delta: "{"}, `output 0 is item "r/0", not "r/1"`},
+		{"a content part of a call", 2, protocol.ContentPartAdded{SequenceNumber: 2, ItemID: "r/0", Part: protocol.OutputText{}}, "is protocol.FunctionCall, not a message"},
+		{"a done the deltas didn't make", 4, protocol.FunctionCallArgumentsDone{SequenceNumber: 4, ItemID: "r/0", Arguments: `{"city":"Lyon"}`}, "aren't the arguments their deltas made"},
+		{"a delta after the arguments are done", 5, protocol.FunctionCallArgumentsDelta{SequenceNumber: 5, ItemID: "r/0", Delta: " "}, "arguments are done"},
+		{"a done twice", 5, protocol.FunctionCallArgumentsDone{SequenceNumber: 5, ItemID: "r/0", Arguments: `{"city":"Paris"}`}, "arguments are done"},
+		{"a call done before its arguments", 4, protocol.OutputItemDone{SequenceNumber: 4, Item: call}, "arguments aren't done"},
+		{"a call done of other arguments", 5, protocol.OutputItemDone{SequenceNumber: 5, Item: with(func(c *protocol.FunctionCall) { c.Arguments = "{}" })}, "aren't the arguments streamed"},
+		{"a call done of another call id", 5, protocol.OutputItemDone{SequenceNumber: 5, Item: with(func(c *protocol.FunctionCall) { c.CallID = "c2" })}, "was added"},
+		{"a call done of another name", 5, protocol.OutputItemDone{SequenceNumber: 5, Item: with(func(c *protocol.FunctionCall) { c.Name = "get_time" })}, "was added"},
+		{"a call done of another type", 5, protocol.OutputItemDone{SequenceNumber: 5, Item: protocol.Message{ID: "r/0"}}, "where a function call was added"},
+		{"a delta after the call is done", 6, protocol.FunctionCallArgumentsDelta{SequenceNumber: 6, ItemID: "r/0", Delta: " "}, "output 0 is done"},
+		{"response.completed with the call open", 5, protocol.ResponseCompleted{SequenceNumber: 5, Response: &protocol.Response{Output: []protocol.Item{call}}}, "output 0 isn't done"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var acc protocol.Accumulator
+			add(t, &acc, callStream()[:tc.n])
+			before := acc.Response()
+			err := acc.Add(tc.e)
+			if err == nil {
+				t.Fatalf("Add(%#v) = nil, want an error containing %q", tc.e, tc.want)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("Add error = %q, want it to contain %q", err, tc.want)
+			}
+			if after := acc.Response(); !reflect.DeepEqual(after, before) {
+				t.Errorf("Response after a refused event = %#v, want it unchanged, %#v", after, before)
+			}
+		})
 	}
 }

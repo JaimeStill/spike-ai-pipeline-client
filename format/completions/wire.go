@@ -193,12 +193,23 @@ type chunk struct {
 	Choices []struct {
 		Index int `json:"index"`
 		Delta struct {
-			Content string `json:"content"`
-			Refusal string `json:"refusal"`
+			Content   string          `json:"content"`
+			Refusal   string          `json:"refusal"`
+			ToolCalls []toolCallDelta `json:"tool_calls"`
 		} `json:"delta"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
 	Usage *usage `json:"usage"`
+}
+
+// toolCallDelta is a fragment of a tool call in a streamed reply's delta, its call found by
+// Index. The call's first fragment carries its ID, Type, and function name; later fragments carry
+// only argument text, which the fragments' arguments make joined in order.
+type toolCallDelta struct {
+	Index    int          `json:"index"`
+	ID       string       `json:"id"`
+	Type     string       `json:"type"`
+	Function functionCall `json:"function"`
 }
 
 // envelopePrefix opens every envelope this format writes: the implementor slug, the format, and

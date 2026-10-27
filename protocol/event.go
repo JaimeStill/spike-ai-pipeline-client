@@ -4,14 +4,17 @@ package protocol
 // under the spec's name. A stream opens with ResponseCreated and closes with one terminal event,
 // ResponseCompleted, ResponseIncomplete, or ResponseFailed, each carrying the Response. Between
 // them each output item is added, its content parts are added, streamed as deltas, and done, and
-// the item is done, in that order; an Accumulator folds the events back into the Response. The
-// set is closed: the event types are this package's, and an event is one of them by value, such
-// as OutputTextDelta, never a pointer to one.
+// the item is done, in that order; a FunctionCall, which has no content parts, streams its
+// arguments as deltas and their done event between being added and being done. An Accumulator
+// folds the events back into the Response. The set is closed: the event types are this
+// package's, and an event is one of them by value, such as OutputTextDelta, never a pointer to
+// one.
 //
 // Every event carries its SequenceNumber, which increases through the stream. An event about an
-// output item carries the item's OutputIndex, its place in the Response's Output, and an event
-// about a content part carries the item's ItemID, the ID of the item as added, and the part's
-// ContentIndex, its place in the item's content. The spec requires the item id there; a format
+// output item carries the item's OutputIndex, its place in the Response's Output; an event about
+// a content part, or about a function call's arguments, carries the item's ItemID, the ID of the
+// item as added; and an event about a content part carries the part's ContentIndex, its place in
+// the item's content. The spec requires the item id there; a format
 // whose API supplies none derives one, as completions does, and leaves it empty only when it has
 // nothing to derive it from.
 type Event interface {
@@ -68,7 +71,7 @@ type OutputItemAdded struct {
 	// OutputIndex is the item's place in the response's output.
 	OutputIndex int
 	// Item is the item as far as it is known when it is added: a Message has its role and no
-	// content.
+	// content, and a FunctionCall its call id and name and no arguments.
 	Item Item
 }
 
@@ -184,3 +187,34 @@ type RefusalDone struct {
 }
 
 func (RefusalDone) event() {}
+
+// FunctionCallArgumentsDelta is response.function_call_arguments.delta: argument text was
+// appended to a FunctionCall item. A function call has no content parts, so the event carries
+// no content index.
+type FunctionCallArgumentsDelta struct {
+	// SequenceNumber is the event's place in the stream.
+	SequenceNumber int
+	// ItemID is the function call's id, its ID as added.
+	ItemID string
+	// OutputIndex is the function call's place in the response's output.
+	OutputIndex int
+	// Delta is the argument text appended.
+	Delta string
+}
+
+func (FunctionCallArgumentsDelta) event() {}
+
+// FunctionCallArgumentsDone is response.function_call_arguments.done: a FunctionCall item's
+// arguments are finished, ahead of its output_item.done.
+type FunctionCallArgumentsDone struct {
+	// SequenceNumber is the event's place in the stream.
+	SequenceNumber int
+	// ItemID is the function call's id, its ID as added.
+	ItemID string
+	// OutputIndex is the function call's place in the response's output.
+	OutputIndex int
+	// Arguments is the call's whole arguments text, its deltas joined.
+	Arguments string
+}
+
+func (FunctionCallArgumentsDone) event() {}

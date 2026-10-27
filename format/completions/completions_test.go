@@ -837,6 +837,26 @@ func TestDecode(t *testing.T) {
 			},
 		},
 		{
+			name: "cut off at the bound, only the last item incomplete",
+			reply: `{"choices":[{"finish_reason":"length","message":{"role":"assistant","content":"Checking.",
+				"tool_calls":[
+					{"id":"c1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}},
+					{"id":"c2","type":"function","function":{"name":"get_weather","arguments":"{\"ci"}}]}}]}`,
+			want: &protocol.Response{
+				Output: []protocol.Item{
+					protocol.Message{
+						Status:  protocol.StatusCompleted,
+						Role:    protocol.RoleAssistant,
+						Content: []protocol.ContentPart{protocol.OutputText{Text: "Checking."}},
+					},
+					protocol.FunctionCall{Status: protocol.StatusCompleted, CallID: "c1", Name: "get_weather", Arguments: `{"city":"Paris"}`},
+					protocol.FunctionCall{Status: protocol.StatusIncomplete, CallID: "c2", Name: "get_weather", Arguments: `{"ci`},
+				},
+				Status:            protocol.StatusIncomplete,
+				IncompleteDetails: &protocol.IncompleteDetails{Reason: protocol.ReasonMaxOutputTokens},
+			},
+		},
+		{
 			name: "first choice only, and no id, so no item ids",
 			reply: `{"choices":[{"message":{"content":"one"},"finish_reason":"stop"},
 				{"message":{"content":"two"},"finish_reason":"length"}]}`,
