@@ -78,12 +78,12 @@ type TranscriptionUsage struct {
 // sent.
 //
 // The upload streams: a goroutine writes the multipart form (the model, response_format json,
-// the language and prompt when set, Native's fields, then the file) into a pipe the request reads, so the clip is
-// read as it is sent, never held whole, and goes chunked, its length unknown. Transcribe returns
-// only once that goroutine has ended, so it has stopped reading File: when the request ends
-// first (a cancelled ctx, a transport failure, an early reply), the pipe is closed and the
-// goroutine's next write fails. A File whose Read blocks holds Transcribe until the Read
-// returns.
+// the language and prompt when set, Native's fields, then the file) into a pipe the request
+// reads, so the clip is read as it is sent, never held whole, and goes chunked, its length
+// unknown. Transcribe returns only once that goroutine has ended, so it has stopped reading
+// File: when the request ends first (a cancelled ctx, a transport failure, an early reply), the
+// pipe is closed and the goroutine's next write fails. A File whose Read blocks holds Transcribe
+// until the Read returns.
 //
 // A File read error is returned wrapped, ahead of whatever the transport made of the upload it
 // cut short. A transport failure or a cancelled ctx is returned wrapped too. A non-2xx reply is
