@@ -33,8 +33,7 @@ func TestStructuredOutput(t *testing.T) {
 				}`),
 				Strict: true,
 			}},
-			// gpt-oss-120b reasons ahead of its answer, within the same bound.
-			MaxOutputTokens: 1024,
+			MaxOutputTokens: chatBound,
 		})
 		if err != nil {
 			t.Fatalf("Generate: %v", err)

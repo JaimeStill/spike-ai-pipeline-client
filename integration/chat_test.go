@@ -19,11 +19,10 @@ func userText(s string) protocol.Message {
 func TestChat(t *testing.T) {
 	eachFormat(t, func(t *testing.T, c *client.Client) {
 		resp, err := c.Generate(requestContext(t), &protocol.Request{
-			Model:        chatModel,
-			Instructions: "Answer in one word.",
-			Input:        []protocol.Item{userText("What is the capital of France?")},
-			// gpt-oss-120b reasons ahead of its answer, within the same bound.
-			MaxOutputTokens: 1024,
+			Model:           chatModel,
+			Instructions:    "Answer in one word.",
+			Input:           []protocol.Item{userText("What is the capital of France?")},
+			MaxOutputTokens: chatBound,
 		})
 		if err != nil {
 			t.Fatalf("Generate: %v", err)

@@ -23,7 +23,7 @@ func TestReasoningRoundTrip(t *testing.T) {
 			Tools:           []protocol.FunctionTool{getWeather},
 			ToolChoice:      protocol.ToolChoiceRequired,
 			Reasoning:       protocol.ReasoningParam{Effort: protocol.ReasoningEffortMedium},
-			MaxOutputTokens: toolsBound,
+			MaxOutputTokens: chatBound,
 		}
 		resp, err := c.Generate(requestContext(t), req)
 		if err != nil {
@@ -72,7 +72,7 @@ func TestReasoningEffort(t *testing.T) {
 				Model:           chatModel,
 				Input:           []protocol.Item{userText("Is 391 a prime number? Answer yes or no.")},
 				Reasoning:       protocol.ReasoningParam{Effort: effort},
-				MaxOutputTokens: toolsBound,
+				MaxOutputTokens: chatBound,
 			})
 			if err != nil {
 				t.Logf("effort %s: Generate error %v", effort, err)

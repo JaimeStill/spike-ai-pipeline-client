@@ -57,10 +57,6 @@ func weatherCall(t *testing.T, resp *protocol.Response) protocol.FunctionCall {
 	return c
 }
 
-// toolsBound bounds every request of the tool scenarios: gpt-oss-120b reasons ahead of its call
-// or its answer, within the same bound.
-const toolsBound = 1024
-
 func TestFunctionCallRequired(t *testing.T) {
 	eachFormat(t, func(t *testing.T, c *client.Client) {
 		resp, err := c.Generate(requestContext(t), &protocol.Request{
@@ -68,7 +64,7 @@ func TestFunctionCallRequired(t *testing.T) {
 			Input:           []protocol.Item{weatherQuestion},
 			Tools:           []protocol.FunctionTool{getWeather},
 			ToolChoice:      protocol.ToolChoiceRequired,
-			MaxOutputTokens: toolsBound,
+			MaxOutputTokens: chatBound,
 		})
 		if err != nil {
 			t.Fatalf("Generate: %v", err)
@@ -87,7 +83,7 @@ func TestFunctionCallRoundTrip(t *testing.T) {
 			Input:           []protocol.Item{weatherQuestion},
 			Tools:           []protocol.FunctionTool{getWeather},
 			ToolChoice:      protocol.ToolChoiceRequired,
-			MaxOutputTokens: toolsBound,
+			MaxOutputTokens: chatBound,
 		}
 		resp, err := c.Generate(requestContext(t), req)
 		if err != nil {
@@ -137,7 +133,7 @@ func TestNamedToolChoices(t *testing.T) {
 					Input:           []protocol.Item{userText("What is 2 + 2? Answer with the number alone.")},
 					Tools:           []protocol.FunctionTool{getTime, getWeather},
 					ToolChoice:      tc.choice,
-					MaxOutputTokens: toolsBound,
+					MaxOutputTokens: chatBound,
 				})
 				if err != nil {
 					t.Logf("%s: Generate error %v", tc.name, err)

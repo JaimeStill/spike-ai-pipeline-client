@@ -26,6 +26,10 @@ const (
 	audioModel  = "ggml-org/gemma-4-E4B-it-GGUF:Q8_0"
 )
 
+// chatBound is the MaxOutputTokens of every request to chatModel: gpt-oss-120b reasons ahead of
+// its answer or its call, within the same bound.
+const chatBound = 1024
+
 // requestTimeout bounds one request. Set A is already loaded, so this covers generation only,
 // which on a reasoning model such as gpt-oss-120b takes tens of seconds.
 const requestTimeout = 3 * time.Minute
@@ -103,14 +107,14 @@ func eachFormatOf(t *testing.T, scenario func(t *testing.T, c *client.Client, f 
 
 // hinted fails t with the message unless ok, where the router keeps f's hints; where it drops
 // them, it logs the message as recorded, not asserted, and the scenario passes either way.
-func (f testFormat) hinted(t *testing.T, ok bool, format string, args ...any) {
+func (f testFormat) hinted(t *testing.T, ok bool, msg string, args ...any) {
 	t.Helper()
 	switch {
 	case ok:
 	case f.dropsHints:
-		t.Logf("recorded, not asserted (the router drops %s's hint): "+format, append([]any{f.name}, args...)...)
+		t.Logf("recorded, not asserted (the router drops %s's hint): "+msg, append([]any{f.name}, args...)...)
 	default:
-		t.Errorf(format, args...)
+		t.Errorf(msg, args...)
 	}
 }
 
