@@ -45,7 +45,7 @@ type RetryPolicy struct {
 	// after it. It is at least 0 and at most MaxDelay.
 	BaseDelay time.Duration
 	// MaxDelay is the cap on any wait, at least 0, and the longest Retry-After the Client
-	// honours.
+	// honors.
 	MaxDelay time.Duration
 }
 
@@ -98,7 +98,7 @@ func (c *Client) send(ctx context.Context, route string, header http.Header, bod
 	attempts := max(c.retry.MaxAttempts, 1)
 	for n := 1; ; n++ {
 		resp, retryAfter, err := c.attempt(ctx, route, header, bytes.NewReader(body), contentType, accept, decodeError)
-		if err == nil || n == attempts || !c.retryable(ctx, err) {
+		if err == nil || n == attempts || !retryable(ctx, err) {
 			return resp, err
 		}
 		wait, ok := parseRetryAfter(retryAfter, time.Now())
@@ -123,7 +123,7 @@ func (c *Client) send(ctx context.Context, route string, header http.Header, bod
 
 // retryable reports whether an attempt that failed with err may be made again: a 408, 429, or
 // 503 reply, or a connection failure before any reply while ctx is live.
-func (c *Client) retryable(ctx context.Context, err error) bool {
+func retryable(ctx context.Context, err error) bool {
 	if apiErr, ok := errors.AsType[*APIError](err); ok {
 		switch apiErr.Status {
 		case http.StatusRequestTimeout, http.StatusTooManyRequests, http.StatusServiceUnavailable:

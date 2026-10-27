@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"iter"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -43,7 +44,7 @@ func eventStream(chunks ...string) string {
 
 // collect ranges seq to its end, folding its events with an Accumulator, and returns the
 // events, the Response folded, and the errors it yielded.
-func collect(t *testing.T, seq func(func(protocol.Event, error) bool)) ([]protocol.Event, *protocol.Response, []error) {
+func collect(t *testing.T, seq iter.Seq2[protocol.Event, error]) ([]protocol.Event, *protocol.Response, []error) {
 	t.Helper()
 	var acc protocol.Accumulator
 	var events []protocol.Event

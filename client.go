@@ -121,7 +121,7 @@ func (c *Client) Generate(ctx context.Context, req *protocol.Request) (*protocol
 	if err != nil {
 		return nil, fmt.Errorf("client: generate: %w", err)
 	}
-	reply, err := c.post(ctx, c.format.Route(), header, body, "application/json", c.format.DecodeError)
+	reply, err := c.post(ctx, c.format.Route(), header, body, c.format.DecodeError)
 	if err != nil {
 		return nil, fmt.Errorf("client: generate: %w", err)
 	}
@@ -140,11 +140,11 @@ func (c *Client) endpoint(route string) string {
 	return u.String()
 }
 
-// post sends body as a POST of contentType to route, with header and the bearer token, and
-// returns the reply's body, as send describes: retried as the Client's policy has it.
-func (c *Client) post(ctx context.Context, route string, header http.Header, body []byte, contentType string,
+// post sends body as a JSON POST to route, with header and the bearer token, and returns the
+// reply's body, as send describes: retried as the Client's policy has it.
+func (c *Client) post(ctx context.Context, route string, header http.Header, body []byte,
 	decodeError func(body []byte) (message, typ, code string)) ([]byte, error) {
-	resp, err := c.send(ctx, route, header, body, contentType, "application/json", decodeError)
+	resp, err := c.send(ctx, route, header, body, "application/json", "application/json", decodeError)
 	if err != nil {
 		return nil, err
 	}
