@@ -20,6 +20,8 @@
 //   - [New] validates a Config and returns a Client.
 //   - [Client] makes requests of one endpoint in one format.
 //   - [Client.Generate] sends a Request and returns its Response.
+//   - [Client.GenerateStream] sends a Request when ranged and yields its response's streaming
+//     events.
 //   - [Client.Embed] sends an *EmbeddingRequest to the OpenAI-compatible embeddings endpoint.
 //   - [EmbeddingRequest] is an embedding model, its inputs, and a native-tier field.
 //   - [Embeddings] is one vector per input, in input order, and usage.

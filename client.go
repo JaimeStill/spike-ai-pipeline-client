@@ -118,12 +118,29 @@ func (c *Client) endpoint(route string) string {
 }
 
 // post sends body as a POST of contentType to route, with header and the bearer token, and
-// returns the reply's body. The token source is called before the request is made, so a source
-// error sends nothing. A body of unknown length, such as a pipe, goes chunked. A non-2xx reply is
-// an *APIError, its details decoded by decodeError: the Client's format's for Generate, and the
-// OpenAI-style decoder for the operations outside the Format.
+// returns the reply's body, as send describes.
 func (c *Client) post(ctx context.Context, route string, header http.Header, body io.Reader, contentType string,
 	decodeError func(body []byte) (message, typ, code string)) ([]byte, error) {
+	resp, err := c.send(ctx, route, header, body, contentType, "application/json", decodeError)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	reply, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+	return reply, nil
+}
+
+// send sends body as a POST of contentType to route, accepting accept, with header and the
+// bearer token, and returns a 2xx reply, its body unread, for the caller to read and close. The
+// token source is called before the request is made, so a source error sends nothing. A body of
+// unknown length, such as a pipe, goes chunked. A non-2xx reply is an *APIError, its body read
+// and closed and its details decoded by decodeError: the Client's format's for Generate and
+// GenerateStream, and the OpenAI-style decoder for the operations outside the Format.
+func (c *Client) send(ctx context.Context, route string, header http.Header, body io.Reader, contentType, accept string,
+	decodeError func(body []byte) (message, typ, code string)) (*http.Response, error) {
 	token := ""
 	if c.token != nil {
 		t, err := c.token(ctx)
@@ -138,7 +155,7 @@ func (c *Client) post(ctx context.Context, route string, header http.Header, bod
 	}
 	maps.Copy(req.Header, header)
 	req.Header.Set("Content-Type", contentType)
-	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept", accept)
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -146,17 +163,14 @@ func (c *Client) post(ctx context.Context, route string, header http.Header, bod
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-	reply, err := io.ReadAll(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		defer func() { _ = resp.Body.Close() }()
 		// A failed read leaves the part of the body that was read, which is still the best
 		// account of the error there is.
+		reply, _ := io.ReadAll(resp.Body)
 		e := &APIError{Status: resp.StatusCode, Body: reply}
 		e.Message, e.Type, e.Code = decodeError(reply)
 		return nil, e
 	}
-	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
-	}
-	return reply, nil
+	return resp, nil
 }
