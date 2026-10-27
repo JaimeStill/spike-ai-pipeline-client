@@ -15,6 +15,7 @@ import (
 	client "github.com/JaimeStill/spike-ai-pipeline-client"
 	"github.com/JaimeStill/spike-ai-pipeline-client/format"
 	"github.com/JaimeStill/spike-ai-pipeline-client/format/completions"
+	"github.com/JaimeStill/spike-ai-pipeline-client/format/messages"
 	"github.com/JaimeStill/spike-ai-pipeline-client/protocol"
 )
 
@@ -60,6 +61,29 @@ func requestContext(t *testing.T) context.Context {
 func chatCompletions(t *testing.T) *client.Client {
 	t.Helper()
 	return newClient(t, completions.New())
+}
+
+// formats are the formats a scenario runs through with eachFormat, by name: the router serves
+// both, each at its own route.
+var formats = []struct {
+	name string
+	new  func() format.Format
+}{
+	{"completions", func() format.Format { return completions.New() }},
+	{"messages", func() format.Format { return messages.New() }},
+}
+
+// eachFormat runs scenario as a subtest of t for each of formats, named for the format, with a
+// Client of the router speaking it, so one piece of test code covers every format, the format the
+// only difference. Messages requires max_tokens, so a scenario sets MaxOutputTokens on every
+// request.
+func eachFormat(t *testing.T, scenario func(t *testing.T, c *client.Client)) {
+	t.Helper()
+	for _, f := range formats {
+		t.Run(f.name, func(t *testing.T) {
+			scenario(t, newClient(t, f.new()))
+		})
+	}
 }
 
 // readTestdata returns the file name in testdata.
