@@ -10,7 +10,7 @@ import (
 )
 
 // embeddingModel is set A's embedding model, whose vectors have 768 dimensions.
-const embeddingModel = "ggml-org/embeddinggemma-2-GGUF:Q8_0"
+const embeddingModel = "mrutkows/granite-embedding-english-r2-GGUF:BF16"
 
 // TestEmbed asks for two unrelated inputs' embeddings, then for the second's alone, and checks
 // the decoding and the order:
