@@ -46,8 +46,19 @@
 // members such as temperature, top_p, seed, and response_format. Its reply always has status
 // completed, even when the output stopped at max_output_tokens.
 //
-// This version of the format sends and decodes an unstreamed request; a streamed reply isn't
-// decoded.
+// A streamed reply becomes the spec's semantic events, under the spec's names, each numbered by
+// the decoder in order and placed at its item's output_index. The router's stream departs from
+// the spec, and the decoder normalizes it: its events carry no sequence_number, output_index, or
+// content_index, so an item is placed in arrival order and an event by its item_id; it streams
+// reasoning under OpenAI's names, response.reasoning_text.delta and .done, which the decoder reads
+// as the spec's response.reasoning.delta and .done; and it leaves events out, which the decoder
+// fills in: a reasoning item's content_part.added and content_part.done, response.reasoning.done,
+// response.function_call_arguments.done, and a part's output_text.done or content_part.done when
+// it sends none. It never repeats an event the server sent. Its stream opens every item before
+// it closes any, and gives a reasoning item no status at its output_item.done, where the decoder
+// completes it. An error frame, the spec's error event or the router's {"error":{...}} of no
+// type, closes the stream with the error event and response.failed. NewStreamDecoder gives the
+// whole account.
 //
 // Its exported identifiers:
 //
@@ -60,7 +71,7 @@
 //   - [Format.DecodeResponse] decodes a response resource into a response: messages,
 //     reasoning, and function calls, with their ids and statuses the server's.
 //   - [Format.EncodeStreamRequest] encodes a request as EncodeRequest does, with stream true.
-//   - [Format.NewStreamDecoder] returns a decoder that refuses the stream, as this version
-//     decodes none.
+//   - [Format.NewStreamDecoder] returns a decoder of a streamed reply into the protocol's
+//     streaming events.
 //   - [Format.DecodeError] decodes an OpenAI-style error body.
 package responses

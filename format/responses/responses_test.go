@@ -537,14 +537,3 @@ func TestDecodeError(t *testing.T) {
 		})
 	}
 }
-
-// TestStreamDecoderRefuses covers this version's stream decoder, which refuses every stream.
-func TestStreamDecoderRefuses(t *testing.T) {
-	d := responses.New(responses.Options{}).NewStreamDecoder()
-	if events, err := d.Decode([]byte(`{"type":"response.created"}`)); err == nil {
-		t.Errorf("Decode = %v, nil; want an error", events)
-	}
-	if events, err := d.End(); err == nil {
-		t.Errorf("End = %v, nil; want an error", events)
-	}
-}

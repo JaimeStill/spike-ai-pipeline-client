@@ -31,9 +31,19 @@ import (
 // usage is the server's input_tokens, output_tokens, total_tokens, and
 // output_tokens_details.reasoning_tokens.
 func (*Format) DecodeResponse(body []byte) (*protocol.Response, error) {
+	resp, err := decodeResponse(body)
+	if err != nil {
+		return nil, fmt.Errorf("responses: %w", err)
+	}
+	return resp, nil
+}
+
+// decodeResponse is DecodeResponse without the package's prefix on its error, for the stream
+// decoder, which decodes a terminal event's response as DecodeResponse decodes a reply.
+func decodeResponse(body []byte) (*protocol.Response, error) {
 	var wire response
 	if err := json.Unmarshal(body, &wire); err != nil {
-		return nil, fmt.Errorf("responses: decode response: %w", err)
+		return nil, fmt.Errorf("decode response: %w", err)
 	}
 	resp := &protocol.Response{Usage: protocol.Usage{
 		InputTokens:  wire.Usage.InputTokens,
@@ -47,7 +57,7 @@ func (*Format) DecodeResponse(body []byte) (*protocol.Response, error) {
 	case protocol.StatusCompleted, protocol.StatusIncomplete, protocol.StatusFailed:
 		resp.Status = s
 	default:
-		return nil, fmt.Errorf("responses: response has status %q, not completed, incomplete, or failed", wire.Status)
+		return nil, fmt.Errorf("response has status %q, not completed, incomplete, or failed", wire.Status)
 	}
 	if d := wire.IncompleteDetails; d != nil {
 		resp.IncompleteDetails = &protocol.IncompleteDetails{Reason: protocol.IncompleteReason(d.Reason)}
@@ -58,7 +68,7 @@ func (*Format) DecodeResponse(body []byte) (*protocol.Response, error) {
 	for i, w := range wire.Output {
 		it, err := decodeItem(w)
 		if err != nil {
-			return nil, fmt.Errorf("responses: output item %d: %w", i, err)
+			return nil, fmt.Errorf("output item %d: %w", i, err)
 		}
 		resp.Output = append(resp.Output, it)
 	}

@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -70,8 +69,7 @@ func chatCompletions(t *testing.T) *client.Client {
 }
 
 // testFormat is a format a scenario runs through: its name, its constructor, whether the router
-// drops the hints hinted checks for it, whether the router reports the token bound for it, and
-// the scenarios it doesn't run yet.
+// drops the hints hinted checks for it, and whether the router reports the token bound for it.
 type testFormat struct {
 	name string
 	new  func() format.Format
@@ -84,9 +82,6 @@ type testFormat struct {
 	// completed, as its Open Responses reply always has status completed, so a scenario records
 	// the status at the bound rather than asserting it.
 	completesAtBound bool
-	// pending names the scenarios, by test name, that the format doesn't run yet, as the
-	// features they cover land in it later; eachFormatOf skips them for the format.
-	pending []string
 }
 
 // formats are the formats a scenario runs through with eachFormat, by name: the router serves
@@ -105,9 +100,6 @@ var openResponses = testFormat{
 	new:              func() format.Format { return responses.New(responses.Options{ResendReasoningText: true}) },
 	dropsHints:       true,
 	completesAtBound: true,
-	pending: []string{
-		"TestStreamText", "TestStreamFunctionCall", "TestStreamReasoningRoundTrip", "TestStreamCancel",
-	},
 }
 
 // eachFormat runs scenario as a subtest of t for each of formats, named for the format, with a
@@ -120,16 +112,11 @@ func eachFormat(t *testing.T, scenario func(t *testing.T, c *client.Client)) {
 }
 
 // eachFormatOf runs scenario as eachFormat does, giving it the format too, for a scenario that
-// asserts a hint where the router keeps it and records it where the router drops it. It skips a
-// format whose pending scenarios name t's test.
+// asserts a hint where the router keeps it and records it where the router drops it.
 func eachFormatOf(t *testing.T, scenario func(t *testing.T, c *client.Client, f testFormat)) {
 	t.Helper()
-	test, _, _ := strings.Cut(t.Name(), "/")
 	for _, f := range formats {
 		t.Run(f.name, func(t *testing.T) {
-			if slices.Contains(f.pending, test) {
-				t.Skipf("the %s format doesn't run %s yet", f.name, test)
-			}
 			scenario(t, newClient(t, f.new()), f)
 		})
 	}

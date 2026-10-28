@@ -29,6 +29,17 @@ be; the error tests read the error bodies.
   the audio extension, `{"type":"spike-ai-pipeline:input_audio","data","format":"wav"}`: the
   router takes no content part but input_text, input_image, and input_file.
 
+- `text.sse` and `tool_call.sse`: the router's streams for the requests of `text.json` and
+  `tool_call.json`, sent with `"stream":true`, as `EncodeStreamRequest` sends it, and recorded as
+  they arrived. Each opens with response.created and response.in_progress, adds each item, streams
+  the reasoning as `response.reasoning_text.delta`, adds the message's one part, streams its text
+  and the call's arguments, and closes every item at the end, then response.completed, whose
+  response holds the whole output and the usage. No event carries a `sequence_number`,
+  `output_index`, or `content_index`; there are no reasoning part events, no reasoning done, and no
+  function_call_arguments.done; and the reasoning item's output_item.done, like the terminal
+  response's reasoning item, has no status. The stream tests compare what the events fold to with
+  what `DecodeResponse` gives for the terminal event's response.
+
 The spec's shapes the router doesn't send, such as a refusal, a summary, a non-empty
 `encrypted_content`, and the incomplete and failed statuses, aren't recorded: the tests write them inline, in the shape the
 spec's OpenAPI document gives.
