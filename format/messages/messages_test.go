@@ -186,6 +186,27 @@ func TestEncode(t *testing.T) {
 			want: `{"model":"m","max_tokens":64,"stream":false,"messages":[{"role":"user","content":[
 				{"type":"image","source":{"type":"url","url":"https://example.com/shapes.png"}}]}]}`,
 		},
+		{
+			name: "reasoning effort as adaptive thinking, its summary dropped",
+			req: &protocol.Request{
+				Model:           "m",
+				Input:           []protocol.Item{text(protocol.RoleUser, "hi")},
+				MaxOutputTokens: 64,
+				Reasoning:       protocol.ReasoningParam{Effort: protocol.ReasoningEffortHigh, Summary: protocol.ReasoningSummaryDetailed},
+			},
+			want: `{"model":"m","max_tokens":64,"stream":false,"thinking":{"type":"adaptive"},"output_config":{"effort":"high"},
+				"messages":[{"role":"user","content":[{"type":"text","text":"hi"}]}]}`,
+		},
+		{
+			name: "reasoning summary alone dropped",
+			req: &protocol.Request{
+				Model:           "m",
+				Input:           []protocol.Item{text(protocol.RoleUser, "hi")},
+				MaxOutputTokens: 64,
+				Reasoning:       protocol.ReasoningParam{Summary: protocol.ReasoningSummaryAuto},
+			},
+			want: `{"model":"m","max_tokens":64,"stream":false,"messages":[{"role":"user","content":[{"type":"text","text":"hi"}]}]}`,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

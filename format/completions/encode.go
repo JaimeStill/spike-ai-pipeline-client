@@ -51,6 +51,8 @@ import (
 // required, and is refused. Reasoning's effort goes out as reasoning_effort, and MaxOutputTokens
 // as max_completion_tokens.
 //
+// The hints Chat Completions has no form for are dropped, never refused: reasoning's summary.
+//
 // Text's format goes out as response_format: plain text as {"type":"text"}, sent because the
 // caller set it, and a JSON schema as {"type":"json_schema","json_schema":{"name","schema"}},
 // with description and strict when set. Text's verbosity goes out as verbosity.

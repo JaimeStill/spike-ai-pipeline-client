@@ -46,10 +46,13 @@
 //     format.
 //   - [Verbosity] is how much detail the model's text gives: [VerbosityLow],
 //     [VerbosityMedium], or [VerbosityHigh].
-//   - [ReasoningParam] configures the model's reasoning: its effort.
+//   - [ReasoningParam] configures the model's reasoning: its effort and its summary.
 //   - [ReasoningEffort] is how much the model reasons: [ReasoningEffortNone],
 //     [ReasoningEffortLow], [ReasoningEffortMedium], [ReasoningEffortHigh], or
 //     [ReasoningEffortXHigh].
+//   - [ReasoningSummary] is how detailed a summary of its reasoning the model gives:
+//     [ReasoningSummaryAuto], [ReasoningSummaryConcise], or [ReasoningSummaryDetailed].
+//   - [MinMaxOutputTokens] is the least nonzero bound a request's MaxOutputTokens takes, 16.
 //   - [Request.Validate] refuses a request the model can't describe.
 //   - [Response] is a model's response: output, status, error, and usage.
 //   - [IncompleteDetails] says why a response is incomplete.
