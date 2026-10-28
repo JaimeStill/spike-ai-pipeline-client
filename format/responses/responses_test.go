@@ -254,6 +254,11 @@ func TestEncodeRefuses(t *testing.T) {
 		{"reasoning effort", &protocol.Request{Model: "m", Input: []protocol.Item{user},
 			Reasoning: protocol.ReasoningParam{Effort: protocol.ReasoningEffortLow}},
 			"reasoning isn't sent by this version of the format"},
+		{"reasoning summary", &protocol.Request{Model: "m", Input: []protocol.Item{user},
+			Reasoning: protocol.ReasoningParam{Summary: protocol.ReasoningSummaryAuto}},
+			"reasoning isn't sent by this version of the format"},
+		{"tool choice", &protocol.Request{Model: "m", Input: []protocol.Item{user}, ToolChoice: protocol.ToolChoiceAuto},
+			"a tool choice isn't sent by this version of the format"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
