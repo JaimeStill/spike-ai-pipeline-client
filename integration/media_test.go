@@ -3,6 +3,7 @@
 package integration_test
 
 import (
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -55,6 +56,31 @@ func TestAudioInChat(t *testing.T) {
 	text := completedText(t, resp)
 	t.Logf("%s: %q", audioModel, text)
 	assertAccessCode(t, text)
+}
+
+// TestAudioInResponses sends audio as the client extension, spike-ai-pipeline:input_audio, which
+// the router's Open Responses route doesn't take, and records its answer: a transcript, or the
+// error it refuses the part with. It passes either way.
+func TestAudioInResponses(t *testing.T) {
+	f := openResponses
+	c := newClient(t, f.new())
+	resp, err := c.Generate(requestContext(t), &protocol.Request{
+		Model: audioModel,
+		Input: []protocol.Item{protocol.Message{Role: protocol.RoleUser, Content: []protocol.ContentPart{
+			protocol.InputText{Text: "Transcribe this audio clip."},
+			protocol.InputAudio{Data: readTestdata(t, "phrase.wav"), Format: protocol.AudioFormatWAV},
+		}}},
+		MaxOutputTokens: 512,
+	})
+	var apiErr *client.APIError
+	switch {
+	case errors.As(err, &apiErr):
+		f.record(t, "refused: %v", apiErr)
+	case err != nil:
+		t.Fatalf("Generate: %v", err)
+	default:
+		f.record(t, "answered: status %q, output %#v", resp.Status, resp.Output)
+	}
 }
 
 // assertAccessCode fails t unless text, a transcript of phrase.wav, carries its code.

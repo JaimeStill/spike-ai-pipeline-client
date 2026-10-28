@@ -4,11 +4,11 @@
 //
 // The module is four layers, importing one way. Package protocol is the model, Open Responses'
 // item model in its stateless subset; package format is the contract a wire format meets; each
-// wire format is a package below it, named for the endpoint it targets, format/completions and
-// format/messages; and this package is the transport, which sends a protocol.Request in the
-// format chosen by its constructor at the caller's composition root. Embeddings and transcription
-// sit beside the protocol, outside the Format, on the OpenAI-compatible shape whatever format the
-// Client speaks.
+// wire format is a package below it, named for the endpoint it targets, format/completions,
+// format/messages, and format/responses; and this package is the transport, which sends a
+// protocol.Request in the format chosen by its constructor at the caller's composition root.
+// Embeddings and transcription sit beside the protocol, outside the Format, on the
+// OpenAI-compatible shape whatever format the Client speaks.
 //
 // The library sets no policy of its own: no default model, token budget, timeout, retry, or
 // size limit. The caller's http.Client and context carry the timeouts, and retry is opt-in, the
