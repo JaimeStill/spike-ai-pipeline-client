@@ -20,10 +20,10 @@ var answer = protocol.Message{Role: protocol.RoleAssistant, Content: []protocol.
 
 const answerJSON = `{"type":"message","role":"assistant","content":[{"type":"output_text","text":"17"}]}`
 
-// callOutputJSON is the function_call_output answering call on the wire.
-const callOutputJSON = `{"type":"function_call_output","call_id":"call_1","output":"17"}`
-
+// callOutput is the function_call_output answering call, on the wire as callOutputJSON.
 var callOutput = protocol.FunctionCallOutput{CallID: "call_1", Output: "17"}
+
+const callOutputJSON = `{"type":"function_call_output","call_id":"call_1","output":"17"}`
 
 // reasoningCase is a request's input and the input array it goes out as.
 type reasoningCase struct {

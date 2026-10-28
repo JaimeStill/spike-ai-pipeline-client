@@ -32,10 +32,10 @@ import (
 //	reasoning             as the format's Options say, below
 //
 // A call with empty arguments, a call of none, goes out with "{}", as the spec's arguments are
-// JSON text. A message's parts are input_text, input_image with its image_url and its detail when set,
-// output_text, and refusal. An item's status, ignored on input, is never sent. An input_audio
-// part goes out as the client extension, {"type":"spike-ai-pipeline:input_audio","data",
-// "format"}, its data the clip's bytes in standard base64 and its format wav or mp3.
+// JSON text. A message's parts are input_text, input_image with its image_url and its detail
+// when set, output_text, and refusal. An item's status, ignored on input, is never sent. An
+// input_audio part goes out as the client extension, {"type":"spike-ai-pipeline:input_audio",
+// "data","format"}, its data the clip's bytes in standard base64 and its format wav or mp3.
 //
 // A reasoning item goes out through the envelope DecodeResponse wrote in its encrypted_content,
 // which holds the server's encrypted_content and the reply's reasoning texts; the item's Content

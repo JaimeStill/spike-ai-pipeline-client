@@ -1,11 +1,12 @@
 # responses testdata
 
 Open Responses replies recorded from the llama.cpp router on gb10-2 (b11669, set A), each
-unstreamed, for a request of the body `EncodeRequest` sends, `"stream":false`, `"store":false`,
-and `"include":["reasoning.encrypted_content"]` among its members, posted to
+unstreamed (`.json`), and two streamed too (`.sse`, below), for a request of the body
+`EncodeRequest` sends, `"stream":false`, `"store":false`, and
+`"include":["reasoning.encrypted_content"]` among its members, posted to
 `/v1/responses?autoload=false`. The successful ones were sent with `temperature` 0 and `seed` 7.
-The decode tests compare what `DecodeResponse` gives for each reply with the response it should
-be; the error tests read the error bodies.
+The decode tests compare what `DecodeResponse` gives for each `.json` reply with the response it
+should be; the error tests read the error bodies.
 
 - `text.json`: gpt-oss-120b with `instructions` "Answer with the names alone.", asked "Name three
   French cities, comma-separated, nothing else." with `max_output_tokens` 256; a reasoning item,
@@ -28,7 +29,6 @@ be; the error tests read the error bodies.
 - `input_audio.json`: the router's 400 body for a request to Gemma 4 E4B whose user message holds
   the audio extension, `{"type":"spike-ai-pipeline:input_audio","data","format":"wav"}`: the
   router takes no content part but input_text, input_image, and input_file.
-
 - `text.sse` and `tool_call.sse`: the router's streams for the requests of `text.json` and
   `tool_call.json`, sent with `"stream":true`, as `EncodeStreamRequest` sends it, and recorded as
   they arrived. Each opens with response.created and response.in_progress, adds each item, streams
@@ -41,5 +41,5 @@ be; the error tests read the error bodies.
   what `DecodeResponse` gives for the terminal event's response.
 
 The spec's shapes the router doesn't send, such as a refusal, a summary, a non-empty
-`encrypted_content`, and the incomplete and failed statuses, aren't recorded: the tests write them inline, in the shape the
-spec's OpenAPI document gives.
+`encrypted_content`, and the incomplete and failed statuses, aren't recorded: the tests write them
+inline, in the shape the spec's OpenAPI document gives.
