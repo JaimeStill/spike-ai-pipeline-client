@@ -214,7 +214,7 @@ type Reasoning struct {
 	// that the responses format's ResendReasoningText sends coming from EncryptedContent.
 	Content []ReasoningText
 	// Summary is a summary of the reasoning, as summary_text parts, when the format supplies
-	// one. Chat Completions doesn't.
+	// one, as Open Responses does; Chat Completions and Messages don't.
 	Summary []SummaryText
 	// EncryptedContent is the reasoning in the form of the format that wrote it, opaque to the
 	// caller, which carries it back unchanged.

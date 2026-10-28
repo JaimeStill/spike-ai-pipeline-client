@@ -22,10 +22,17 @@
 // empty. Options.ResendReasoningText sends the texts back as content too: the one exception to
 // protocol.Reasoning's rule that a format never sends a reasoning item's text on input, for an
 // endpoint such as llama.cpp's router, which gives no encrypted_content and reads the reasoning
-// from content. Another format's envelope is dropped on encode.
+// from content; under it, a run of reasoning that no assistant message or function_call follows
+// is dropped, as the router refuses one. Another format's envelope is dropped on encode.
 //
-// Audio input goes out as the protocol's client extension, spike-ai-pipeline:input_audio, the
-// spec having no audio input part.
+// Audio input goes out as the protocol's client extension, the spec having no audio input
+// part: the content part {"type":"spike-ai-pipeline:input_audio","data","format"}, its data the
+// clip's bytes in standard base64 and its format wav or mp3.
+//
+// The spec has a form for every hint the protocol carries, so the format drops none: an image's
+// detail, reasoning's summary, text's verbosity, and a JSON-schema format's name, description,
+// and strict flag each go out when set. Whether they reach a model is up to the endpoint, as
+// the router's account below shows.
 //
 // The format's Options adjust it to an endpoint that departs from the spec; their zero value is
 // the spec's form.
@@ -56,7 +63,10 @@
 // response.function_call_arguments.done, and a part's output_text.done or content_part.done when
 // it sends none. It never repeats an event the server sent. Its stream opens every item before
 // it closes any, and gives a reasoning item no status at its output_item.done, where the decoder
-// completes it. An error frame, the spec's error event or the router's {"error":{...}} of no
+// completes it. The Response the events fold into is DecodeResponse's of the terminal event's
+// response, with one exception: an item the router gives no status, its streamed reasoning
+// item, takes the completed status of its output_item.done, so the folded Response agrees with
+// the events. An error frame, the spec's error event or the router's {"error":{...}} of no
 // type, closes the stream with the error event and response.failed. NewStreamDecoder gives the
 // whole account.
 //
@@ -72,6 +82,7 @@
 //     reasoning, and function calls, with their ids and statuses the server's.
 //   - [Format.EncodeStreamRequest] encodes a request as EncodeRequest does, with stream true.
 //   - [Format.NewStreamDecoder] returns a decoder of a streamed reply into the protocol's
-//     streaming events.
+//     streaming events, whose folded Response is DecodeResponse's of the terminal response, an
+//     item of no status there taking its output_item.done's.
 //   - [Format.DecodeError] decodes an OpenAI-style error body.
 package responses

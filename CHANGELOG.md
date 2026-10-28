@@ -6,6 +6,67 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 
 ## [Unreleased]
 
+## [v0.4.0] - 2026-10-28
+
+### Added
+
+- `format/responses`, the Open Responses format (`/responses`, spec 2026-04-24), built with
+  `responses.New(responses.Options{})` as `client.Config`'s `Format`. It sends the protocol's
+  request under the spec's own names, so every hint the protocol carries goes out and none is
+  dropped: instructions, input items in order, tools with `strict` always sent, the tool choice,
+  reasoning's effort and summary, the text format and verbosity, and `max_output_tokens`. The
+  native tier merges into the body's top level as in the other formats, a clashing member
+  refused. It targets the endpoints that serve the spec, such as llama.cpp's router.
+- Every Open Responses request is stateless: it sends `store` false and `include`
+  `["reasoning.encrypted_content"]`, never `previous_response_id`, and a `Native`
+  `previous_response_id` or `background` member is refused before anything is sent, as each asks
+  the endpoint to keep state that the client's model, a request's input being the whole
+  conversation, has no place for. A reply in progress or queued is an error.
+- Reasoning through Open Responses: `DecodeResponse` writes the format's envelope into a
+  reasoning item's `encrypted_content`, `spike-ai-pipeline:responses/v1:` and base64 of
+  `{"encrypted_content","content"}`, the server's `encrypted_content` and the item's reasoning
+  texts. In the spec's form, the zero `Options`, the item goes back by the server's
+  `encrypted_content` alone, never its text, and is dropped when the server gave none. Another
+  format's envelope is dropped on encode, never an error.
+- `responses.Options` and its one option, `ResendReasoningText`, which sends a reasoning item's
+  texts back as its content too, for an endpoint such as llama.cpp's router that gives no
+  `encrypted_content` and reads the reasoning from there; a run of reasoning that no assistant
+  message or function_call follows is dropped, as the router refuses one. It is the one
+  exception to `protocol.Reasoning`'s rule that a format never sends reasoning content on
+  input, and even then the text sent is the envelope's, never the item's `Content`.
+- Audio input through Open Responses as the client extension's own wire form,
+  `{"type":"spike-ai-pipeline:input_audio","data","format"}`, its data the clip in standard
+  base64 and its format wav or mp3.
+- `DecodeResponse` decodes a response resource's messages, reasoning items, and function calls
+  with the server's ids and statuses, its status, `incomplete_details`, a failed response's
+  error, and its usage; `DecodeError` decodes the OpenAI-style error body with
+  `format.DecodeOpenAIError`, the spec defining none.
+- Streaming in `format/responses`: `EncodeStreamRequest` sends `stream` true, and the stream
+  decoder passes the spec's semantic events through, numbered afresh, and normalizes a stream
+  that departs from the spec, as llama.cpp's router's does: an event with no `sequence_number`,
+  `output_index`, or `content_index` is placed by arrival order and its `item_id`;
+  `response.reasoning_text.delta` and `.done`, OpenAI's names, are read as the spec's
+  `response.reasoning.delta` and `.done`; the done and part events the stream leaves out are
+  filled in, never repeating one the server sent; and an item of no status at its
+  `output_item.done` is completed. The folded Response is `DecodeResponse`'s of the terminal
+  response, except that an item the router gives no status there, its streamed reasoning item,
+  takes the completed status of its `output_item.done`. An error frame, the spec's error event
+  or llama.cpp's `{"error":{...}}` of no type, ends the stream with the error event and
+  `response.failed`.
+- `protocol.ReasoningParam.Summary`, a `protocol.ReasoningSummary` of `ReasoningSummaryAuto`,
+  `ReasoningSummaryConcise`, or `ReasoningSummaryDetailed`, which asks for a summary of the
+  model's reasoning; `Request.Validate` refuses any other value. Open Responses sends it as
+  `reasoning.summary`.
+- `protocol.MinMaxOutputTokens`, 16, the spec's least `max_output_tokens`.
+
+### Changed
+
+- **Breaking:** a behavior change: `Request.Validate`, and so every operation that sends a
+  `protocol.Request`, refuses a `MaxOutputTokens` of 1 through 15, below `MinMaxOutputTokens`,
+  whatever the format. v0.3.0 sent it. Zero still leaves the bound to the endpoint.
+- `format/completions` and `format/messages` drop reasoning's summary, which their APIs have no
+  form for, never refusing it.
+
 ## [v0.3.0] - 2026-10-27
 
 ### Added
@@ -184,7 +245,8 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
   memory, and `Transcribe` returns only once it has stopped reading it. The reply carries no
   timestamps.
 
-[Unreleased]: https://github.com/JaimeStill/spike-ai-pipeline-client/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/JaimeStill/spike-ai-pipeline-client/compare/v0.4.0...HEAD
+[v0.4.0]: https://github.com/JaimeStill/spike-ai-pipeline-client/compare/v0.3.0...v0.4.0
 [v0.3.0]: https://github.com/JaimeStill/spike-ai-pipeline-client/compare/v0.2.0...v0.3.0
 [v0.2.0]: https://github.com/JaimeStill/spike-ai-pipeline-client/compare/v0.1.0...v0.2.0
 [v0.1.0]: https://github.com/JaimeStill/spike-ai-pipeline-client/releases/tag/v0.1.0
