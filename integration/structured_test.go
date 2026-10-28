@@ -12,8 +12,8 @@ import (
 
 // TestStructuredOutput asks for a country's capital under a strict JSON schema, and wants a
 // completed answer whose output_text decodes into a Go value of the schema's shape, as a caller
-// decodes it. The router drops Messages' output_config, so through Messages the answer's shape
-// is recorded, not asserted.
+// decodes it. The router drops Messages' output_config and Open Responses' text, so through
+// those formats the answer's shape is recorded, not asserted.
 func TestStructuredOutput(t *testing.T) {
 	eachFormatOf(t, func(t *testing.T, c *client.Client, f testFormat) {
 		resp, err := c.Generate(requestContext(t), &protocol.Request{

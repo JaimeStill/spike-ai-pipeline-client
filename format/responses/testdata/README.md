@@ -11,6 +11,11 @@ be; the error tests read the error bodies.
   French cities, comma-separated, nothing else." with `max_output_tokens` 256; a reasoning item,
   its summary and `encrypted_content` empty, then a message of one output_text, every item's id
   the router's (`rs_`, `msg_`) and status `completed`.
+- `tool_call.json`: gpt-oss-120b asked "What is the weather in Paris right now?" with one tool,
+  `get_weather` (`strict` false), `tool_choice` "required", `reasoning` `{"effort":"medium"}`, and
+  `max_output_tokens` 1024; a reasoning item, its summary and `encrypted_content` empty, then a
+  function_call of `get_weather` with `{"city":"Paris"}`, every item's id the router's (`rs_`,
+  `fc_`, and `call_` for its call_id) and status `completed`.
 - `length.json`: Gemma 4 E4B asked "Count from 1 to 20, separated by spaces." with
   `max_output_tokens` 16; a message cut off at the bound, `output_tokens` 16, which the router
   reports with status `completed` and no `incomplete_details`.
@@ -24,6 +29,6 @@ be; the error tests read the error bodies.
   the audio extension, `{"type":"spike-ai-pipeline:input_audio","data","format":"wav"}`: the
   router takes no content part but input_text, input_image, and input_file.
 
-The spec's shapes the router doesn't send, such as a refusal, a summary, a function_call, and the
-incomplete and failed statuses, aren't recorded: the tests write them inline, in the shape the
+The spec's shapes the router doesn't send, such as a refusal, a summary, a non-empty
+`encrypted_content`, and the incomplete and failed statuses, aren't recorded: the tests write them inline, in the shape the
 spec's OpenAPI document gives.

@@ -1,7 +1,9 @@
 package responses_test
 
 import (
+	"encoding/base64"
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -13,16 +15,22 @@ import (
 	"github.com/JaimeStill/spike-ai-pipeline-client/protocol"
 )
 
-// encode encodes req with the spec's form of the format, failing t if it is invalid or
+// encode encodes req with the spec's form of the format, as encodeWith does.
+func encode(t *testing.T, req *protocol.Request) []byte {
+	t.Helper()
+	return encodeWith(t, responses.Options{}, req)
+}
+
+// encodeWith encodes req with the format adjusted by opts, failing t if it is invalid or
 // EncodeRequest refuses it, or if EncodeRequest sets a header. The client validates every
 // request before encoding it, so a request the format is given here is a valid one.
-func encode(t *testing.T, req *protocol.Request) []byte {
+func encodeWith(t *testing.T, opts responses.Options, req *protocol.Request) []byte {
 	t.Helper()
 	if err := req.Validate(); err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
 	header := make(http.Header)
-	body, err := responses.New(responses.Options{}).EncodeRequest(req, header)
+	body, err := responses.New(opts).EncodeRequest(req, header)
 	if err != nil {
 		t.Fatalf("EncodeRequest: %v", err)
 	}
@@ -60,6 +68,23 @@ func assertJSON(t *testing.T, got []byte, want string) {
 	if string(g) != string(w) {
 		t.Errorf("body = %s\nwant   %s", g, w)
 	}
+}
+
+// seal returns the responses format's envelope of the server's encrypted_content enc and the
+// reasoning texts, as DecodeResponse writes it into a reasoning item's encrypted_content.
+func seal(t *testing.T, enc string, texts ...string) string {
+	t.Helper()
+	if texts == nil {
+		texts = []string{}
+	}
+	b, err := json.Marshal(struct {
+		EncryptedContent string   `json:"encrypted_content"`
+		Content          []string `json:"content"`
+	}{enc, texts})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return "spike-ai-pipeline:responses/v1:" + base64.StdEncoding.EncodeToString(b)
 }
 
 func text(role protocol.Role, s string) protocol.Message {
@@ -245,20 +270,15 @@ func TestEncodeRefuses(t *testing.T) {
 			"native member previous_response_id asks the endpoint to keep state"},
 		{"native background", withNative(ask(user), `{"background":false}`),
 			"native member background asks the endpoint to keep state"},
-		{"function_call", ask(user, protocol.FunctionCall{CallID: "c1", Name: "f"}),
-			"input 1: item protocol.FunctionCall isn't sent by this version of the format"},
-		{"reasoning", ask(protocol.Reasoning{EncryptedContent: "x"}, user),
-			"input 0: item protocol.Reasoning isn't sent by this version of the format"},
-		{"tools", &protocol.Request{Model: "m", Input: []protocol.Item{user}, Tools: []protocol.FunctionTool{{Name: "f"}}},
-			"tools aren't sent by this version of the format"},
-		{"reasoning effort", &protocol.Request{Model: "m", Input: []protocol.Item{user},
-			Reasoning: protocol.ReasoningParam{Effort: protocol.ReasoningEffortLow}},
-			"reasoning isn't sent by this version of the format"},
-		{"reasoning summary", &protocol.Request{Model: "m", Input: []protocol.Item{user},
-			Reasoning: protocol.ReasoningParam{Summary: protocol.ReasoningSummaryAuto}},
-			"reasoning isn't sent by this version of the format"},
-		{"tool choice", &protocol.Request{Model: "m", Input: []protocol.Item{user}, ToolChoice: protocol.ToolChoiceAuto},
-			"a tool choice isn't sent by this version of the format"},
+		{"native tools beside typed tools", withNative(&protocol.Request{Model: "m", Input: []protocol.Item{user},
+			Tools: []protocol.FunctionTool{{Name: "f"}}}, `{"tools":[]}`),
+			"native member tools clashes with a member the request sets"},
+		{"native tool_choice beside a typed one", withNative(&protocol.Request{Model: "m", Input: []protocol.Item{user},
+			ToolChoice: protocol.ToolChoiceAuto}, `{"tool_choice":"none"}`),
+			"native member tool_choice clashes with a member the request sets"},
+		{"native reasoning beside a typed effort", withNative(&protocol.Request{Model: "m", Input: []protocol.Item{user},
+			Reasoning: protocol.ReasoningParam{Effort: protocol.ReasoningEffortLow}}, `{"reasoning":{}}`),
+			"native member reasoning clashes with a member the request sets"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -279,6 +299,9 @@ func TestEncodeRefuses(t *testing.T) {
 // textReasoning is the reasoning text of the reply recorded in testdata/text.json.
 const textReasoning = `The user asks: "Name three French cities, comma-separated, nothing else." The developer says: "Answer with the names alone." So we should output three French city names, separated by commas, no extra text. So something like "Paris, Lyon, Marseille". Ensure no extra punctuation beyond commas. Probably just that.`
 
+// toolCallReasoning is the reasoning text of the reply recorded in testdata/tool_call.json.
+const toolCallReasoning = "User asks current weather in Paris. Use function get_weather."
+
 // TestDecodeRecorded decodes the router's replies recorded in testdata.
 func TestDecodeRecorded(t *testing.T) {
 	cases := []struct {
@@ -295,6 +318,8 @@ func TestDecodeRecorded(t *testing.T) {
 						ID:      "rs_Pt1rtkP5f8C8yiCOAXqiF7kVKWuw2TVi",
 						Status:  protocol.StatusCompleted,
 						Content: []protocol.ReasoningText{{Text: textReasoning}},
+						// The router's encrypted_content, empty, and the reasoning text, sealed.
+						EncryptedContent: seal(t, "", textReasoning),
 					},
 					protocol.Message{
 						ID:      "msg_BlIKh9EJElGVax8sok27dAu1gSSdNMXW",
@@ -305,6 +330,33 @@ func TestDecodeRecorded(t *testing.T) {
 				},
 				Status: protocol.StatusCompleted,
 				Usage:  protocol.Usage{InputTokens: 91, OutputTokens: 80, TotalTokens: 171},
+			},
+		},
+		{
+			// gpt-oss-120b's reasoning ahead of its call, the reasoning's encrypted_content the
+			// format's envelope of the router's, empty, and the reasoning text.
+			file: "tool_call.json",
+			want: &protocol.Response{
+				Output: []protocol.Item{
+					protocol.Reasoning{
+						ID:      "rs_H4pfaCFvrGf1ljLr7M56OB81gR3sEvYK",
+						Status:  protocol.StatusCompleted,
+						Content: []protocol.ReasoningText{{Text: toolCallReasoning}},
+						// The envelope's literal, pinned: base64 of
+						// {"encrypted_content":"","content":["User asks current weather in Paris. Use function get_weather."]}.
+						EncryptedContent: "spike-ai-pipeline:responses/v1:" +
+							"eyJlbmNyeXB0ZWRfY29udGVudCI6IiIsImNvbnRlbnQiOlsiVXNlciBhc2tzIGN1cnJlbnQgd2VhdGhlciBpbiBQYXJpcy4gVXNlIGZ1bmN0aW9uIGdldF93ZWF0aGVyLiJdfQ==",
+					},
+					protocol.FunctionCall{
+						ID:        "fc_HMhSOwdRkvjir1D59ezHFChk5pTnYdJc",
+						Status:    protocol.StatusCompleted,
+						CallID:    "call_HMhSOwdRkvjir1D59ezHFChk5pTnYdJc",
+						Name:      "get_weather",
+						Arguments: "{\n  \"city\": \"Paris\"\n}",
+					},
+				},
+				Status: protocol.StatusCompleted,
+				Usage:  protocol.Usage{InputTokens: 138, OutputTokens: 40, TotalTokens: 178},
 			},
 		},
 		{
@@ -375,7 +427,7 @@ func TestDecode(t *testing.T) {
 						Status:           protocol.StatusCompleted,
 						Content:          []protocol.ReasoningText{{Text: "hm"}, {Text: "ok"}},
 						Summary:          []protocol.SummaryText{{Text: "Looked it up."}},
-						EncryptedContent: "opaque",
+						EncryptedContent: seal(t, "opaque", "hm", "ok"),
 					},
 					protocol.FunctionCall{ID: "fc_1", Status: protocol.StatusCompleted, CallID: "call_1", Name: "get_weather",
 						Arguments: `{"city":"Paris"}`},

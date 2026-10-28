@@ -97,16 +97,15 @@ var formats = []testFormat{
 	openResponses,
 }
 
-// openResponses is the Open Responses format, in the spec's form, which a scenario of its own,
-// such as the audio extension's, runs alone.
+// openResponses is the Open Responses format, with ResendReasoningText, as the router reads a
+// reasoning item's text from its content and gives no encrypted_content to send back instead; a
+// scenario of its own, such as the audio extension's, runs it alone.
 var openResponses = testFormat{
 	name:             "responses",
-	new:              func() format.Format { return responses.New(responses.Options{}) },
+	new:              func() format.Format { return responses.New(responses.Options{ResendReasoningText: true}) },
 	dropsHints:       true,
 	completesAtBound: true,
 	pending: []string{
-		"TestFunctionCallRequired", "TestFunctionCallRoundTrip", "TestNamedToolChoices",
-		"TestReasoningRoundTrip", "TestReasoningEffort", "TestStructuredOutput",
 		"TestStreamText", "TestStreamFunctionCall", "TestStreamReasoningRoundTrip", "TestStreamCancel",
 	},
 }

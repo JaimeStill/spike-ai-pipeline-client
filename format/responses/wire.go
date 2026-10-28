@@ -13,6 +13,13 @@ type request struct {
 	Instructions string `json:"instructions,omitzero"`
 	// Input is the input items, always an array of items, never the string form.
 	Input []any `json:"input"`
+	// Tools carries the function tools, omitted when there are none.
+	Tools []functionTool `json:"tools,omitzero"`
+	// ToolChoice carries the tool choice, a mode's string, a specificFunction, or an
+	// allowedTools, omitted when the request sets none.
+	ToolChoice any `json:"tool_choice,omitzero"`
+	// Reasoning carries the reasoning effort and summary, omitted when the request sets neither.
+	Reasoning *reasoningParam `json:"reasoning,omitzero"`
 	// Text carries the text format and verbosity, omitted when the request sets neither.
 	Text *textParam `json:"text,omitzero"`
 	// MaxOutputTokens carries max_output_tokens, omitted when the request leaves the bound to
@@ -47,6 +54,68 @@ type textFormat struct {
 	Strict      bool           `json:"strict,omitzero"`
 }
 
+// functionTool is a function tool: its name, its description and parameters, each omitted when
+// unset, and its strict flag, always sent, so false stays false at an endpoint whose default is
+// true, as llama.cpp's router's is.
+type functionTool struct {
+	Type        string         `json:"type"`
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitzero"`
+	Parameters  jsontext.Value `json:"parameters,omitzero"`
+	Strict      bool           `json:"strict"`
+}
+
+// specificFunction is the tool choice of one named function, and an allowed set's member.
+type specificFunction struct {
+	Type string `json:"type"`
+	Name string `json:"name"`
+}
+
+// allowedTools is the allowed_tools tool choice: the functions the model may call, and its mode.
+type allowedTools struct {
+	Type  string             `json:"type"`
+	Tools []specificFunction `json:"tools"`
+	Mode  string             `json:"mode"`
+}
+
+// reasoningParam is the spec's reasoning parameter: an effort and a summary, each omitted when
+// unset.
+type reasoningParam struct {
+	Effort  string `json:"effort,omitzero"`
+	Summary string `json:"summary,omitzero"`
+}
+
+// functionCallItem is a function_call input item: its id, sent when the item has one, its
+// call_id, name, and arguments.
+type functionCallItem struct {
+	Type      string `json:"type"`
+	ID        string `json:"id,omitzero"`
+	CallID    string `json:"call_id"`
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
+// functionCallOutputItem is a function_call_output input item: its id, sent when the item has
+// one, its call_id, and its output, a string or an array of content parts.
+type functionCallOutputItem struct {
+	Type   string `json:"type"`
+	ID     string `json:"id,omitzero"`
+	CallID string `json:"call_id"`
+	Output any    `json:"output"`
+}
+
+// reasoningItem is a reasoning input item: its id, sent when the item has one; its summary,
+// which the spec requires, an empty array when there is none; its content, the reasoning_text
+// parts Options.ResendReasoningText sends, omitted otherwise; and its encrypted_content, the
+// server's, omitted when the server gave none.
+type reasoningItem struct {
+	Type             string     `json:"type"`
+	ID               string     `json:"id,omitzero"`
+	Summary          []textPart `json:"summary"`
+	Content          []textPart `json:"content,omitzero"`
+	EncryptedContent string     `json:"encrypted_content,omitzero"`
+}
+
 // messageItem is a message input item: its id, sent when the item has one, its role, and its
 // content, always an array of parts.
 type messageItem struct {
@@ -56,7 +125,7 @@ type messageItem struct {
 	Content []any  `json:"content"`
 }
 
-// textPart is an input_text or output_text content part.
+// textPart is an input_text, output_text, reasoning_text, or summary_text part.
 type textPart struct {
 	Type string `json:"type"`
 	Text string `json:"text"`
@@ -144,4 +213,27 @@ type usage struct {
 // outputTokensDetails breaks a response's output tokens down.
 type outputTokensDetails struct {
 	ReasoningTokens int `json:"reasoning_tokens"`
+}
+
+// envelopePrefix opens every envelope this format writes: the implementor slug, the format, and
+// the envelope's version. A Reasoning item's encrypted_content without it was written by another
+// format, or by another version of this one, and isn't this format's to read.
+const envelopePrefix = "spike-ai-pipeline:responses/v1:"
+
+// envelope is what this format writes into a Reasoning item's encrypted_content when it decodes
+// a reply, and reads back when it encodes the item: what it may resend for the reasoning. Its
+// layout is envelopePrefix followed by the envelope as JSON in standard, padded base64, both
+// members always present:
+//
+//	spike-ai-pipeline:responses/v1:eyJlbmNyeXB0ZWRfY29udGVudCI6IiIsImNvbnRlbnQiOltdfQ==
+//
+// The members are pointers so that an envelope missing one reads as malformed. A change to the
+// layout or the members' meaning is a new version, and a new prefix.
+type envelope struct {
+	// EncryptedContent is the server's encrypted_content, which the spec's form sends back as
+	// the item's, empty when the server gave none.
+	EncryptedContent *string `json:"encrypted_content,omitzero"`
+	// Content is the texts of the item's reasoning_text parts, in order, which
+	// Options.ResendReasoningText sends back as the item's content.
+	Content *[]string `json:"content,omitzero"`
 }

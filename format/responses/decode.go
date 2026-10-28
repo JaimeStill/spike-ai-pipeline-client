@@ -1,6 +1,7 @@
 package responses
 
 import (
+	"encoding/base64"
 	"encoding/json/v2"
 	"fmt"
 
@@ -14,7 +15,9 @@ import (
 //	message        a message of its role: an output_text part for each output_text, and a
 //	               refusal part for each refusal, their annotations and logprobs dropped
 //	reasoning      a reasoning item: its content's reasoning_text parts, its summary's
-//	               summary_text parts, and its encrypted_content as the server gave it
+//	               summary_text parts, and its encrypted_content the format's envelope,
+//	               holding the server's encrypted_content and the reasoning_text parts'
+//	               texts, which EncodeRequest reads back
 //	function_call  a function_call item: its call_id, name, and arguments
 //
 // An output item of any other type is an error naming it, as is a part of a type its item
@@ -80,12 +83,14 @@ func decodeItem(w outputItem) (protocol.Item, error) {
 		}
 		return m, nil
 	case "reasoning":
-		r := protocol.Reasoning{ID: w.ID, Status: status, EncryptedContent: w.EncryptedContent}
+		r := protocol.Reasoning{ID: w.ID, Status: status}
+		texts := make([]string, 0, len(w.Content))
 		for i, p := range w.Content {
 			if p.Type != "reasoning_text" {
 				return nil, fmt.Errorf("reasoning content %d has unknown type %q", i, p.Type)
 			}
 			r.Content = append(r.Content, protocol.ReasoningText{Text: p.Text})
+			texts = append(texts, p.Text)
 		}
 		for i, p := range w.Summary {
 			if p.Type != "summary_text" {
@@ -93,6 +98,11 @@ func decodeItem(w outputItem) (protocol.Item, error) {
 			}
 			r.Summary = append(r.Summary, protocol.SummaryText{Text: p.Text})
 		}
+		sealed, err := sealEnvelope(envelope{EncryptedContent: &w.EncryptedContent, Content: &texts})
+		if err != nil {
+			return nil, err
+		}
+		r.EncryptedContent = sealed
 		return r, nil
 	case "function_call":
 		return protocol.FunctionCall{
@@ -104,6 +114,16 @@ func decodeItem(w outputItem) (protocol.Item, error) {
 		}, nil
 	}
 	return nil, fmt.Errorf("unknown type %q", w.Type)
+}
+
+// sealEnvelope returns e in its encrypted_content layout: envelopePrefix, then e as JSON in
+// base64.
+func sealEnvelope(e envelope) (string, error) {
+	b, err := json.Marshal(e)
+	if err != nil {
+		return "", err
+	}
+	return envelopePrefix + base64.StdEncoding.EncodeToString(b), nil
 }
 
 // DecodeError decodes the error body of a non-2xx reply. The spec defines none, so the format
