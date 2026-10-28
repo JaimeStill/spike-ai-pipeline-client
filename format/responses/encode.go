@@ -3,7 +3,6 @@ package responses
 import (
 	"encoding/base64"
 	"encoding/json/jsontext"
-	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"net/http"
@@ -89,18 +88,11 @@ func (f *Format) encodeRequest(req *protocol.Request, stream bool) ([]byte, erro
 	})
 }
 
-// refuseStateful refuses a Native, which the client has validated as a JSON object or empty, that
-// has a previous_response_id or background member, as EncodeRequest describes.
+// refuseStateful refuses a Native, which the client has validated, that has a
+// previous_response_id or background member, as EncodeRequest describes.
 func refuseStateful(v jsontext.Value) error {
-	if len(v) == 0 {
-		return nil
-	}
-	var members map[string]jsontext.Value
-	if err := json.Unmarshal(v, &members); err != nil {
-		return fmt.Errorf("native: %w", err)
-	}
 	for _, name := range []string{"previous_response_id", "background"} {
-		if _, ok := members[name]; ok {
+		if native.Has(v, name) {
 			return fmt.Errorf("native member %s asks the endpoint to keep state, which a stateless request never does", name)
 		}
 	}
