@@ -16,6 +16,7 @@ import (
 	"github.com/JaimeStill/spike-ai-pipeline-client/format"
 	"github.com/JaimeStill/spike-ai-pipeline-client/format/completions"
 	"github.com/JaimeStill/spike-ai-pipeline-client/format/messages"
+	"github.com/JaimeStill/spike-ai-pipeline-client/format/responses"
 	"github.com/JaimeStill/spike-ai-pipeline-client/protocol"
 )
 
@@ -67,23 +68,38 @@ func chatCompletions(t *testing.T) *client.Client {
 	return newClient(t, completions.New())
 }
 
-// testFormat is a format a scenario runs through: its name, its constructor, and whether the
-// router drops the hints hinted checks for it.
+// testFormat is a format a scenario runs through: its name, its constructor, whether the router
+// drops the hints hinted checks for it, and whether the router reports the token bound for it.
 type testFormat struct {
 	name string
 	new  func() format.Format
 	// dropsHints is set when the router drops the format's structured output before it reaches
-	// the model, as it drops Messages' output_config, so hinted records the check rather than
-	// asserting it. Reasoning effort and the named and none tool choices are recorded on every
-	// format, by record.
+	// the model, as it drops Messages' output_config and Open Responses' text, so hinted records
+	// the check rather than asserting it. Reasoning effort and the named and none tool choices
+	// are recorded on every format, by record.
 	dropsHints bool
+	// completesAtBound is set when the router reports a reply stopped at max_output_tokens as
+	// completed, as its Open Responses reply always has status completed, so a scenario records
+	// the status at the bound rather than asserting it.
+	completesAtBound bool
 }
 
 // formats are the formats a scenario runs through with eachFormat, by name: the router serves
-// both, each at its own route.
+// each at its own route.
 var formats = []testFormat{
 	{name: "completions", new: func() format.Format { return completions.New() }},
 	{name: "messages", new: func() format.Format { return messages.New() }, dropsHints: true},
+	openResponses,
+}
+
+// openResponses is the Open Responses format, with ResendReasoningText, as the router reads a
+// reasoning item's text from its content and gives no encrypted_content to send back instead; a
+// scenario of its own, such as the audio extension's, runs it alone.
+var openResponses = testFormat{
+	name:             "responses",
+	new:              func() format.Format { return responses.New(responses.Options{ResendReasoningText: true}) },
+	dropsHints:       true,
+	completesAtBound: true,
 }
 
 // eachFormat runs scenario as a subtest of t for each of formats, named for the format, with a

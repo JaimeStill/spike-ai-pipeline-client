@@ -51,6 +51,8 @@ import (
 // required, and is refused. Reasoning's effort goes out as reasoning_effort, and MaxOutputTokens
 // as max_completion_tokens.
 //
+// The hints Chat Completions has no form for are dropped, never refused: reasoning's summary.
+//
 // Text's format goes out as response_format: plain text as {"type":"text"}, sent because the
 // caller set it, and a JSON schema as {"type":"json_schema","json_schema":{"name","schema"}},
 // with description and strict when set. Text's verbosity goes out as verbosity.
@@ -83,7 +85,7 @@ func encodeRequest(req *protocol.Request, stream bool) ([]byte, error) {
 	}
 	if stream {
 		body.StreamOptions = &streamOptions{IncludeUsage: true}
-	} else if hasMember(req.Native, "stream_options") {
+	} else if native.Has(req.Native, "stream_options") {
 		// The unstreamed body has no stream_options for the member to clash with, but it is
 		// the stream's, so it is refused in both.
 		return nil, errors.New("completions: native member stream_options clashes with the format's streaming")
@@ -123,16 +125,6 @@ func encodeRequest(req *protocol.Request, stream bool) ([]byte, error) {
 		return nil, fmt.Errorf("completions: %w", err)
 	}
 	return b, nil
-}
-
-// hasMember reports whether native, a request's Native, has a member named name.
-func hasMember(native jsontext.Value, name string) bool {
-	var members map[string]jsontext.Value
-	if len(native) == 0 || json.Unmarshal(native, &members) != nil {
-		return false
-	}
-	_, ok := members[name]
-	return ok
 }
 
 // encodeInput encodes the input items as messages, joining each run of assistant items into one

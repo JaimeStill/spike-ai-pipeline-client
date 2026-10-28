@@ -31,9 +31,17 @@
 // mappings change, and callers' Go code doesn't.
 //
 //   - Audio input: [InputAudio], wire type spike-ai-pipeline:input_audio, extending spec
-//     2026-04-24. An audio input content part in the spec would replace it. A format whose API
-//     has audio input of its own sends the clip in that API's form instead, as Chat Completions
-//     does with input_audio.
+//     2026-04-24. An audio input content part in the spec would replace it. On the Open
+//     Responses wire it is the content part {"type":"spike-ai-pipeline:input_audio","data",
+//     "format"}, its data the clip's bytes in standard base64 and its format wav or mp3. A
+//     format whose API has audio input of its own sends the clip in that API's form instead, as
+//     Chat Completions does with input_audio; one whose API has none refuses it, as Messages
+//     does.
+//
+// A format's reasoning envelope, the slug-prefixed layout it writes into a Reasoning item's
+// encrypted_content, such as spike-ai-pipeline:responses/v1:, is not a client extension: it
+// rides in a member the spec defines and leaves opaque, adds nothing to the spec's wire model,
+// and no standard feature would replace it. The format that writes it documents it.
 //
 // Its exported identifiers:
 //
@@ -46,10 +54,13 @@
 //     format.
 //   - [Verbosity] is how much detail the model's text gives: [VerbosityLow],
 //     [VerbosityMedium], or [VerbosityHigh].
-//   - [ReasoningParam] configures the model's reasoning: its effort.
+//   - [ReasoningParam] configures the model's reasoning: its effort and its summary.
 //   - [ReasoningEffort] is how much the model reasons: [ReasoningEffortNone],
 //     [ReasoningEffortLow], [ReasoningEffortMedium], [ReasoningEffortHigh], or
 //     [ReasoningEffortXHigh].
+//   - [ReasoningSummary] is how detailed a summary of its reasoning the model gives:
+//     [ReasoningSummaryAuto], [ReasoningSummaryConcise], or [ReasoningSummaryDetailed].
+//   - [MinMaxOutputTokens] is the least nonzero bound a request's MaxOutputTokens takes, 16.
 //   - [Request.Validate] refuses a request the model can't describe.
 //   - [Response] is a model's response: output, status, error, and usage.
 //   - [IncompleteDetails] says why a response is incomplete.

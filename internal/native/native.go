@@ -1,7 +1,7 @@
 // Package native holds what the module's native tier shares across its layers: the check of a
-// request's Native field, and the encoding of a wire body that merges it, which protocol, the
-// formats, and the client's operations outside the Format each need and none can import from
-// another.
+// request's Native field, the lookup of a member in it, and the encoding of a wire body that
+// merges it, which protocol, the formats, and the client's operations outside the Format each
+// need and none can import from another.
 package native
 
 import (
@@ -15,6 +15,16 @@ import (
 // member names.
 func Valid(v jsontext.Value) bool {
 	return len(v) == 0 || (v.Kind() == jsontext.KindBeginObject && v.IsValid())
+}
+
+// Has reports whether v, a Valid Native field, has a member named name.
+func Has(v jsontext.Value, name string) bool {
+	var members map[string]jsontext.Value
+	if len(v) == 0 || json.Unmarshal(v, &members) != nil {
+		return false
+	}
+	_, ok := members[name]
+	return ok
 }
 
 // Marshal encodes body, a wire body whose Native field is embedded in its top level, as JSON. A

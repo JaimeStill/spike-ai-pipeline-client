@@ -110,9 +110,9 @@ func TestFunctionCallRoundTrip(t *testing.T) {
 
 // TestNamedToolChoices records what the endpoint does with a named function, an allowed_tools,
 // and a none tool choice, and passes either way: llama.cpp b11669 treats the named and
-// allowed_tools choices as auto on Chat Completions, and on Messages treats a named tool as any
-// and drops none, the tools still live. Each asks a question that needs no tool, so a call shows
-// a named choice was honored, and none was not.
+// allowed_tools choices as auto on Chat Completions and Open Responses, and on Messages treats a
+// named tool as any and drops none, the tools still live. Each asks a question that needs no
+// tool, so a call shows a named choice was honored, and none was not.
 func TestNamedToolChoices(t *testing.T) {
 	cases := []struct {
 		name   string

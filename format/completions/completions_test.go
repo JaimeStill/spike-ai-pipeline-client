@@ -370,6 +370,15 @@ func TestEncode(t *testing.T) {
 			want: `{"model":"m","stream":false,"messages":[{"role":"user","content":"hi"}],"reasoning_effort":"xhigh"}`,
 		},
 		{
+			name: "reasoning summary dropped",
+			req: &protocol.Request{
+				Model:     "m",
+				Input:     []protocol.Item{text(protocol.RoleUser, "hi")},
+				Reasoning: protocol.ReasoningParam{Effort: protocol.ReasoningEffortLow, Summary: protocol.ReasoningSummaryDetailed},
+			},
+			want: `{"model":"m","stream":false,"messages":[{"role":"user","content":"hi"}],"reasoning_effort":"low"}`,
+		},
+		{
 			name: "plain text format as response_format text",
 			req: &protocol.Request{
 				Model: "m",

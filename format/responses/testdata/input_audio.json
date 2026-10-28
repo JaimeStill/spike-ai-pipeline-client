@@ -1,0 +1,1 @@
+{"error":{"code":400,"message":"'type' must be one of 'input_text', 'input_image', or 'input_file'","type":"invalid_request_error"}}

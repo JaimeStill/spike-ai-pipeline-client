@@ -4,6 +4,8 @@
 // /completions API. A caller builds it with New at the composition root, as client.Config's
 // Format.
 //
+// The hints Chat Completions has no form for are dropped, never refused: reasoning's summary.
+//
 // Its exported identifiers:
 //
 //   - [Format] is the format, a format.Format.

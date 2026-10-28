@@ -14,9 +14,9 @@
 // {"thinking","signature"} or the redacted_thinking block's {"data"}; another format's envelope
 // is dropped on encode.
 //
-// The hints Messages has no form for are dropped, never refused: an image's detail; text's
-// verbosity; and a JSON-schema text format's name, description, and strict flag. Only
-// input_audio, which has no Messages form either, is refused.
+// The hints Messages has no form for are dropped, never refused: an image's detail; reasoning's
+// summary; text's verbosity; and a JSON-schema text format's name, description, and strict
+// flag. Only input_audio, which has no Messages form either, is refused.
 //
 // llama.cpp's router, b11669, rebuilds a Messages body as a Chat Completions one and keeps only
 // the members it reads: messages, tools, tool_choice, stop_sequences, max_tokens, temperature,

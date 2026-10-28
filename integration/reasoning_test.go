@@ -13,8 +13,8 @@ import (
 // TestReasoningRoundTrip asks with a reasoning effort for a call, wants reasoning ahead of it,
 // sends the response's output back as it came, reasoning included, with the call's output, and
 // wants a completed answer that uses it. That the reasoning reached the wire, as the assistant
-// message's reasoning_content or its thinking block, is the unit tier's to prove; the exported
-// API doesn't show the body.
+// message's reasoning_content, its thinking block, or the reasoning item's content, is the unit
+// tier's to prove; the exported API doesn't show the body.
 func TestReasoningRoundTrip(t *testing.T) {
 	eachFormat(t, func(t *testing.T, c *client.Client) {
 		req := &protocol.Request{

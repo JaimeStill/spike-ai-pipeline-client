@@ -192,6 +192,11 @@ func (FunctionCallOutput) item() {}
 // caller carries it back unchanged. A format reading another format's EncryptedContent drops
 // the item rather than send it.
 //
+// One exception sends reasoning text on input: the responses format's ResendReasoningText
+// option, for an endpoint that reads the reasoning from an input item's content, as llama.cpp's
+// router does. Even then Content is ignored: the text sent is the one the format wrote into
+// EncryptedContent.
+//
 // Reasoning has a Status, as every other output item does. The spec's reference schema for the
 // reasoning item omits status, but its normative rule for items requires id, type, and status on
 // every item, and its own reasoning example carries one; the client follows the rule.
@@ -205,10 +210,11 @@ type Reasoning struct {
 	// ignored on input.
 	Status Status
 	// Content is the reasoning the model produced, as reasoning_text parts, when the format
-	// supplies it. It is output only: on input it is ignored and never sent.
+	// supplies it. It is output only: on input it is ignored and never sent, the reasoning text
+	// that the responses format's ResendReasoningText sends coming from EncryptedContent.
 	Content []ReasoningText
 	// Summary is a summary of the reasoning, as summary_text parts, when the format supplies
-	// one. Chat Completions doesn't.
+	// one, as Open Responses does; Chat Completions and Messages don't.
 	Summary []SummaryText
 	// EncryptedContent is the reasoning in the form of the format that wrote it, opaque to the
 	// caller, which carries it back unchanged.

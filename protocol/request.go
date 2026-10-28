@@ -27,7 +27,8 @@ type Request struct {
 	// verbosity. Its zero value leaves both to the endpoint.
 	Text TextParam
 	// MaxOutputTokens bounds the tokens the model generates, reasoning included. Zero leaves
-	// the bound to the endpoint.
+	// the bound to the endpoint; otherwise it is at least MinMaxOutputTokens, the spec's
+	// minimum.
 	MaxOutputTokens int
 	// Native is the native tier: a JSON object whose members are merged into the top level of
 	// the wire body as they are, for a feature of the endpoint the model doesn't cover, such
@@ -37,12 +38,17 @@ type Request struct {
 	Native jsontext.Value
 }
 
-// ReasoningParam configures a reasoning model's reasoning: the spec's reasoning parameter. The
-// spec's summary member, which asks for a reasoning summary, is left out: Chat Completions has
-// no form for it. It joins with the Open Responses format, whose API has one.
+// MinMaxOutputTokens is the least nonzero MaxOutputTokens a request takes, the spec's minimum
+// for max_output_tokens.
+const MinMaxOutputTokens = 16
+
+// ReasoningParam configures a reasoning model's reasoning: the spec's reasoning parameter.
 type ReasoningParam struct {
 	// Effort is how much the model reasons. Empty leaves it to the endpoint.
 	Effort ReasoningEffort
+	// Summary asks for a summary of the model's reasoning, and how detailed. Empty asks for
+	// none. A format whose API has no form for it drops it.
+	Summary ReasoningSummary
 }
 
 // ReasoningEffort is how much a model reasons before it answers. More effort may take longer
@@ -63,11 +69,26 @@ const (
 	ReasoningEffortXHigh ReasoningEffort = "xhigh"
 )
 
+// ReasoningSummary is how detailed a summary of its reasoning a model gives, alongside the
+// reasoning itself.
+type ReasoningSummary string
+
+// The summaries a ReasoningParam takes.
+const (
+	// ReasoningSummaryAuto leaves the summary's detail to the model.
+	ReasoningSummaryAuto ReasoningSummary = "auto"
+	// ReasoningSummaryConcise asks for a brief summary.
+	ReasoningSummaryConcise ReasoningSummary = "concise"
+	// ReasoningSummaryDetailed asks for a thorough summary.
+	ReasoningSummaryDetailed ReasoningSummary = "detailed"
+)
+
 // Validate reports whether the request is one the model can describe, so a caller can check a
 // request before sending it; a client validates every request before anything is sent. It
 // refuses:
 //
-//   - nil, no model, no input, or a negative MaxOutputTokens
+//   - nil, no model, no input, or a MaxOutputTokens that is negative or below
+//     MinMaxOutputTokens without being zero
 //   - an item, content part, tool choice, or text format that isn't one of this package's by
 //     value (a *Message is refused)
 //   - a message with an unknown role or no content, or a part its role doesn't take
@@ -80,7 +101,7 @@ const (
 //     parameters that aren't a JSON object
 //   - a tool choice of an unknown mode, naming a function the request doesn't declare, or of
 //     allowed_tools with no tools
-//   - a reasoning effort or a verbosity the spec doesn't define
+//   - a reasoning effort, a reasoning summary, or a verbosity the spec doesn't define
 //   - a json_schema format with no name, a name the spec doesn't allow, or a schema that isn't
 //     a JSON object
 //   - a Native that isn't a JSON object with unique member names
@@ -106,11 +127,18 @@ func (r *Request) validate() error {
 		return errors.New("request has no input")
 	case r.MaxOutputTokens < 0:
 		return fmt.Errorf("request's max output tokens %d is negative", r.MaxOutputTokens)
+	case r.MaxOutputTokens > 0 && r.MaxOutputTokens < MinMaxOutputTokens:
+		return fmt.Errorf("request's max output tokens %d is below the minimum, %d", r.MaxOutputTokens, MinMaxOutputTokens)
 	}
 	switch r.Reasoning.Effort {
 	case "", ReasoningEffortNone, ReasoningEffortLow, ReasoningEffortMedium, ReasoningEffortHigh, ReasoningEffortXHigh:
 	default:
 		return fmt.Errorf("request has unknown reasoning effort %q", r.Reasoning.Effort)
+	}
+	switch r.Reasoning.Summary {
+	case "", ReasoningSummaryAuto, ReasoningSummaryConcise, ReasoningSummaryDetailed:
+	default:
+		return fmt.Errorf("request has unknown reasoning summary %q", r.Reasoning.Summary)
 	}
 	if err := validateText(r.Text); err != nil {
 		return fmt.Errorf("text: %w", err)

@@ -111,6 +111,11 @@ func TestValidateAccepts(t *testing.T) {
 		{"reasoning effort medium", with(func(r *protocol.Request) { r.Reasoning.Effort = protocol.ReasoningEffortMedium })},
 		{"reasoning effort high", with(func(r *protocol.Request) { r.Reasoning.Effort = protocol.ReasoningEffortHigh })},
 		{"reasoning effort xhigh", with(func(r *protocol.Request) { r.Reasoning.Effort = protocol.ReasoningEffortXHigh })},
+		{"reasoning summary auto", with(func(r *protocol.Request) { r.Reasoning.Summary = protocol.ReasoningSummaryAuto })},
+		{"reasoning summary concise", with(func(r *protocol.Request) { r.Reasoning.Summary = protocol.ReasoningSummaryConcise })},
+		{"reasoning summary detailed", with(func(r *protocol.Request) { r.Reasoning.Summary = protocol.ReasoningSummaryDetailed })},
+		{"max output tokens at the minimum", with(func(r *protocol.Request) { r.MaxOutputTokens = 16 })},
+		{"max output tokens zero", with(func(r *protocol.Request) { r.MaxOutputTokens = 0 })},
 		{"plain text format", with(func(r *protocol.Request) { r.Text.Format = protocol.PlainTextFormat{} })},
 		{"json_schema format, every field set", with(func(r *protocol.Request) {
 			r.Text.Format = protocol.JSONSchemaFormat{
@@ -229,6 +234,8 @@ func TestValidateRefuses(t *testing.T) {
 		}), "unsupported item *protocol.Reasoning"},
 		{"unknown reasoning effort", with(func(r *protocol.Request) { r.Reasoning.Effort = "minimal" }),
 			`unknown reasoning effort "minimal"`},
+		{"unknown reasoning summary", with(func(r *protocol.Request) { r.Reasoning.Summary = "brief" }),
+			`unknown reasoning summary "brief"`},
 		{"pointer function call", with(func(r *protocol.Request) {
 			r.Input = []protocol.Item{&protocol.FunctionCall{CallID: "c1", Name: "f"}}
 		}), "unsupported item *protocol.FunctionCall"},
@@ -331,6 +338,10 @@ func TestValidateRefuses(t *testing.T) {
 		{"unknown verbosity", with(func(r *protocol.Request) { r.Text.Verbosity = "max" }),
 			`text: unknown verbosity "max"`},
 		{"negative max output tokens", with(func(r *protocol.Request) { r.MaxOutputTokens = -1 }), "negative"},
+		{"max output tokens 1", with(func(r *protocol.Request) { r.MaxOutputTokens = 1 }),
+			"max output tokens 1 is below the minimum, 16"},
+		{"max output tokens 15", with(func(r *protocol.Request) { r.MaxOutputTokens = 15 }),
+			"max output tokens 15 is below the minimum, 16"},
 		{"native array", with(func(r *protocol.Request) { r.Native = []byte(`[1]`) }), "native field"},
 		{"native invalid", with(func(r *protocol.Request) { r.Native = []byte(`{"a":`) }), "native field"},
 		{"native duplicate", with(func(r *protocol.Request) { r.Native = []byte(`{"a":1,"a":2}`) }), "native field"},

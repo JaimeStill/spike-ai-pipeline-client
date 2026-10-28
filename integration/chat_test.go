@@ -35,8 +35,10 @@ func TestChat(t *testing.T) {
 	})
 }
 
+// TestChatIncompleteAtMaxOutputTokens asserts the response stops at the bound, incomplete; on a
+// format the router reports completed there, it records the status instead.
 func TestChatIncompleteAtMaxOutputTokens(t *testing.T) {
-	eachFormat(t, func(t *testing.T, c *client.Client) {
+	eachFormatOf(t, func(t *testing.T, c *client.Client, f testFormat) {
 		const bound = 16
 		resp, err := c.Generate(requestContext(t), &protocol.Request{
 			Model:           chatModel,
@@ -47,7 +49,10 @@ func TestChatIncompleteAtMaxOutputTokens(t *testing.T) {
 			t.Fatalf("Generate: %v", err)
 		}
 		want := protocol.IncompleteDetails{Reason: protocol.ReasonMaxOutputTokens}
-		if resp.Status != protocol.StatusIncomplete || resp.IncompleteDetails == nil || *resp.IncompleteDetails != want {
+		if f.completesAtBound {
+			f.record(t, "status %q, incomplete_details %+v, output_tokens %d at the bound %d",
+				resp.Status, resp.IncompleteDetails, resp.Usage.OutputTokens, bound)
+		} else if resp.Status != protocol.StatusIncomplete || resp.IncompleteDetails == nil || *resp.IncompleteDetails != want {
 			t.Errorf("Status = %q, IncompleteDetails = %+v; want incomplete, %+v", resp.Status, resp.IncompleteDetails, want)
 		}
 		if resp.Usage.OutputTokens > bound {

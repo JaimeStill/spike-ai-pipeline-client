@@ -1,0 +1,87 @@
+event: response.created
+data: {"type":"response.created","response":{"id":"resp_A6oBzAY0HnVhHgkH6anQP6XrjNeCjEfP","object":"response","status":"in_progress"}}
+
+event: response.in_progress
+data: {"type":"response.in_progress","response":{"id":"resp_A6oBzAY0HnVhHgkH6anQP6XrjNeCjEfP","object":"response","status":"in_progress"}}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","item":{"id":"rs_Ez5hgLi2ioU8m83JLwF86wnX6VoPCBdR","summary":[],"type":"reasoning","content":[],"encrypted_content":"","status":"in_progress"}}
+
+event: response.reasoning_text.delta
+data: {"type":"response.reasoning_text.delta","delta":"User","item_id":"rs_Ez5hgLi2ioU8m83JLwF86wnX6VoPCBdR"}
+
+event: response.reasoning_text.delta
+data: {"type":"response.reasoning_text.delta","delta":" asks","item_id":"rs_Ez5hgLi2ioU8m83JLwF86wnX6VoPCBdR"}
+
+event: response.reasoning_text.delta
+data: {"type":"response.reasoning_text.delta","delta":" current","item_id":"rs_Ez5hgLi2ioU8m83JLwF86wnX6VoPCBdR"}
+
+event: response.reasoning_text.delta
+data: {"type":"response.reasoning_text.delta","delta":" weather","item_id":"rs_Ez5hgLi2ioU8m83JLwF86wnX6VoPCBdR"}
+
+event: response.reasoning_text.delta
+data: {"type":"response.reasoning_text.delta","delta":" in","item_id":"rs_Ez5hgLi2ioU8m83JLwF86wnX6VoPCBdR"}
+
+event: response.reasoning_text.delta
+data: {"type":"response.reasoning_text.delta","delta":" Paris","item_id":"rs_Ez5hgLi2ioU8m83JLwF86wnX6VoPCBdR"}
+
+event: response.reasoning_text.delta
+data: {"type":"response.reasoning_text.delta","delta":".","item_id":"rs_Ez5hgLi2ioU8m83JLwF86wnX6VoPCBdR"}
+
+event: response.reasoning_text.delta
+data: {"type":"response.reasoning_text.delta","delta":" Need","item_id":"rs_Ez5hgLi2ioU8m83JLwF86wnX6VoPCBdR"}
+
+event: response.reasoning_text.delta
+data: {"type":"response.reasoning_text.delta","delta":" to","item_id":"rs_Ez5hgLi2ioU8m83JLwF86wnX6VoPCBdR"}
+
+event: response.reasoning_text.delta
+data: {"type":"response.reasoning_text.delta","delta":" call","item_id":"rs_Ez5hgLi2ioU8m83JLwF86wnX6VoPCBdR"}
+
+event: response.reasoning_text.delta
+data: {"type":"response.reasoning_text.delta","delta":" get","item_id":"rs_Ez5hgLi2ioU8m83JLwF86wnX6VoPCBdR"}
+
+event: response.reasoning_text.delta
+data: {"type":"response.reasoning_text.delta","delta":"_weather","item_id":"rs_Ez5hgLi2ioU8m83JLwF86wnX6VoPCBdR"}
+
+event: response.reasoning_text.delta
+data: {"type":"response.reasoning_text.delta","delta":" function","item_id":"rs_Ez5hgLi2ioU8m83JLwF86wnX6VoPCBdR"}
+
+event: response.reasoning_text.delta
+data: {"type":"response.reasoning_text.delta","delta":".","item_id":"rs_Ez5hgLi2ioU8m83JLwF86wnX6VoPCBdR"}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","item":{"id":"fc_TVKSdkeSZt62DYlf3kxA8ZIG66tWeCdD","arguments":"","call_id":"call_TVKSdkeSZt62DYlf3kxA8ZIG66tWeCdD","name":"get_weather","type":"function_call","status":"in_progress"}}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"{","item_id":"fc_TVKSdkeSZt62DYlf3kxA8ZIG66tWeCdD"}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"\n  \"","item_id":"fc_TVKSdkeSZt62DYlf3kxA8ZIG66tWeCdD"}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"city","item_id":"fc_TVKSdkeSZt62DYlf3kxA8ZIG66tWeCdD"}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"\":","item_id":"fc_TVKSdkeSZt62DYlf3kxA8ZIG66tWeCdD"}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":" \"","item_id":"fc_TVKSdkeSZt62DYlf3kxA8ZIG66tWeCdD"}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"Paris","item_id":"fc_TVKSdkeSZt62DYlf3kxA8ZIG66tWeCdD"}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"\"","item_id":"fc_TVKSdkeSZt62DYlf3kxA8ZIG66tWeCdD"}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"\n}","item_id":"fc_TVKSdkeSZt62DYlf3kxA8ZIG66tWeCdD"}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","item":{"id":"rs_Ez5hgLi2ioU8m83JLwF86wnX6VoPCBdR","summary":[],"type":"reasoning","content":[{"text":"User asks current weather in Paris. Need to call get_weather function.","type":"reasoning_text"}],"encrypted_content":""}}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","item":{"id":"fc_TVKSdkeSZt62DYlf3kxA8ZIG66tWeCdD","type":"function_call","status":"completed","arguments":"{\n  \"city\": \"Paris\"\n}","call_id":"call_TVKSdkeSZt62DYlf3kxA8ZIG66tWeCdD","name":"get_weather"}}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"resp_A6oBzAY0HnVhHgkH6anQP6XrjNeCjEfP","object":"response","created_at":1793210835,"status":"completed","model":"ggml-org/gpt-oss-120b-GGUF:MXFP4","output":[{"id":"rs_Ez5hgLi2ioU8m83JLwF86wnX6VoPCBdR","summary":[],"type":"reasoning","content":[{"text":"User asks current weather in Paris. Need to call get_weather function.","type":"reasoning_text"}],"encrypted_content":""},{"id":"fc_TVKSdkeSZt62DYlf3kxA8ZIG66tWeCdD","type":"function_call","status":"completed","arguments":"{\n  \"city\": \"Paris\"\n}","call_id":"call_TVKSdkeSZt62DYlf3kxA8ZIG66tWeCdD","name":"get_weather"}],"usage":{"input_tokens":134,"output_tokens":42,"total_tokens":176,"input_tokens_details":{"cached_tokens":56}}},"timings":{"cache_n":56,"prompt_n":78,"prompt_ms":257.002,"prompt_per_token_ms":3.294897435897436,"prompt_per_second":303.4995836608275,"predicted_n":42,"predicted_ms":755.049,"predicted_per_token_ms":18.415829268292683,"predicted_per_second":54.30111158348664}}
+
