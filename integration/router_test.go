@@ -23,7 +23,7 @@ import (
 // Set A's roles: the model each test sends to.
 const (
 	chatModel   = "ggml-org/gpt-oss-120b-GGUF:MXFP4"
-	visionModel = "ggml-org/gemma-4-26B-A4B-it-GGUF:Q4_0"
+	visionModel = "google/gemma-4-26B-A4B-it-qat-q4_0-gguf:Q4_0"
 	audioModel  = "ggml-org/gemma-4-E4B-it-GGUF:Q8_0"
 )
 
